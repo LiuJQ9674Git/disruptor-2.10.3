@@ -1,37 +1,3 @@
-/*
- * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-/*
- * Written by Doug Lea with assistance from members of JCP JSR-166
- * Expert Group.  Adapted and released, under explicit permission,
- * from JDK ArrayList.java which carries the following copyright:
- *
- * Copyright 1997 by Sun Microsystems, Inc.,
- * 901 San Antonio Road, Palo Alto, California, 94303, U.S.A.
- * All rights reserved.
- */
-
 package java.util.concurrent;
 
 import java.lang.invoke.VarHandle;
