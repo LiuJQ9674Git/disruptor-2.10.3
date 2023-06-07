@@ -24,6 +24,8 @@ import jdk.internal.access.SharedSecrets;
  * A thread-safe variant of {@link java.util.ArrayList} in which all mutative
  * operations ({@code add}, {@code set}, and so on) are implemented by
  * making a fresh copy of the underlying array.
+ *<p>
+ *ArrayList的线程安全变体，其中所有可变操作（添加、设置等）都是通过制作底层数组的新副本来实现的。
  *
  * <p>This is ordinarily too costly, but may be <em>more</em> efficient
  * than alternatives when traversal operations vastly outnumber
@@ -40,6 +42,16 @@ import jdk.internal.access.SharedSecrets;
  * {@code add}) are not supported. These methods throw
  * {@code UnsupportedOperationException}.
  *
+ *<p>
+ *这通常成本太高，但当遍历操作的数量远远超过突变时，可能比替代方案更高效，
+ *当您不能或不想同步遍历，但需要排除并发线程之间的干扰时，这很有用。
+ *“快照”风格的迭代器方法使用对创建迭代器时数组状态的引用。
+ *这个数组在迭代器的生存期内永远不会更改，因此不可能发生干扰，
+ *并且迭代器保证不会抛出ConcurrentModificationException。
+ *迭代器不会反映自创建迭代器以来对列表的添加、删除或更改。
+ *不支持迭代器本身的元素更改操作（移除、设置和添加）。
+ *这些方法抛出UnsupportedOperationException。
+ *
  * <p>All elements are permitted, including {@code null}.
  *
  * <p>Memory consistency effects: As with other concurrent
@@ -48,7 +60,10 @@ import jdk.internal.access.SharedSecrets;
  * <a href="package-summary.html#MemoryVisibility"><i>happen-before</i></a>
  * actions subsequent to the access or removal of that element from
  * the {@code CopyOnWriteArrayList} in another thread.
- *
+ *<p>
+ *内存一致性影响：与其他并发集合一样，在将对象放入CopyOnWriteArrayList之前，
+ *线程中的操作发生在另一个线程中从CopyOnWriteArray列表访问或删除该元素之后的操作之前。
+ *放入线程 happen-before 访问或删除线程
  * <p>This class is a member of the
  * <a href="{@docRoot}/java.base/java/util/package-summary.html#CollectionsFramework">
  * Java Collections Framework</a>.

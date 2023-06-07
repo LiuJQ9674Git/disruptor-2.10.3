@@ -28,6 +28,12 @@ import java.util.function.Predicate;
  * Like most other concurrent collection implementations, this class
  * does not permit the use of {@code null} elements.
  *
+ *<p>
+ *基于链节点的无边界线程安全队列。该队列对元素FIFO（先进先出）进行排序。
+ *队列的头是在队列中停留时间最长的元素。队列的尾部是在队列中停留时间最短的元素。
+ *新元素被插入到队列的尾部，队列检索操作获得队列头部的元素。当许多线程共享对公共集合的访问权时，
+ *ConcurrentLinkedQueue是一个合适的选择。与大多数其他并发集合实现一样，此类不允许使用null元素。
+ *
  * <p>This implementation employs an efficient <em>non-blocking</em>
  * algorithm based on one described in
  * <a href="http://www.cs.rochester.edu/~scott/papers/1996_PODC_queues.pdf">
@@ -41,17 +47,30 @@ import java.util.function.Predicate;
  * with other operations.  Elements contained in the queue since the creation
  * of the iterator will be returned exactly once.
  *
+ *<p>
+ *迭代器是弱一致的，返回的元素反映了迭代器创建时或创建之后某个时刻的队列状态。
+ *它们不会抛出java.util.ConcurrentModificationException，并且可以与其他操作并行进行。
+ *自迭代器创建以来，队列中包含的元素将只返回一次。
+ *
  * <p>Beware that, unlike in most collections, the {@code size} method
  * is <em>NOT</em> a constant-time operation. Because of the
  * asynchronous nature of these queues, determining the current number
  * of elements requires a traversal of the elements, and so may report
  * inaccurate results if this collection is modified during traversal.
+ *<p>
+ *注意，与大多数集合不同，size方法不是一个常量时间运算。
+ *由于这些队列的异步性质，确定当前元素数量需要遍历元素，因此如果在遍历过程中修改此集合，
+ *则可能会报告不准确的结果。
  *
  * <p>Bulk operations that add, remove, or examine multiple elements,
  * such as {@link #addAll}, {@link #removeIf} or {@link #forEach},
  * are <em>not</em> guaranteed to be performed atomically.
  * For example, a {@code forEach} traversal concurrent with an {@code
  * addAll} operation might observe only some of the added elements.
+ *
+ *<p>
+ *添加、删除或检查多个元素的大容量操作（如addAll、removeIf或forEach）不能保证以原子方式执行。
+ *例如，与addAll操作并发的forEach遍历可能只观察到一些添加的元素。
  *
  * <p>This class and its iterator implement all of the <em>optional</em>
  * methods of the {@link Queue} and {@link Iterator} interfaces.
@@ -62,6 +81,10 @@ import java.util.function.Predicate;
  * <a href="package-summary.html#MemoryVisibility"><i>happen-before</i></a>
  * actions subsequent to the access or removal of that element from
  * the {@code ConcurrentLinkedQueue} in another thread.
+ *
+ *<p>
+ *内存一致性影响：与其他并发集合一样，在将对象放入ConcurrentLinkedQueue之前，
+ *线程中的操作发生在另一个线程中从ConcurrentLinkdQueue访问或删除该元素之后的操作之前。
  *
  * <p>This class is a member of the
  * <a href="{@docRoot}/java.base/java/util/package-summary.html#CollectionsFramework">
@@ -88,12 +111,20 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * pointers" or related techniques seen in versions used in
      * non-GC'ed settings.
      *
-     * The fundamental invariants are:
+     *注意，像该包中的大多数非阻塞算法一样，该实现依赖于在垃圾中收集的系统，
+     *不存在ABA问题的可能性到回收节点，因此无需使用“计数指针”或在中使用的版本中看
+     *到的相关技术非GC’ed设置。
+     * The fundamental invariants are:基本不变量是：
      * - There is exactly one (last) Node with a null next reference,
      *   which is CASed when enqueueing.  This last Node can be
      *   reached in O(1) time from tail, but tail is merely an
      *   optimization - it can always be reached in O(N) time from
      *   head as well.
+     *
+     *   恰好有一个（最后一个）节点具有空的下一个引用，其在排队时被CASed。
+     *   最后一个节点可以在O（1）时间内从尾部到达，
+     *   但尾部只是一个优化——它也总是可以在0（N）时间内从头到达。
+     *   
      * - The elements contained in the queue are the non-null items in
      *   Nodes that are reachable from head.  CASing the item
      *   reference of a Node to null atomically removes it from the
