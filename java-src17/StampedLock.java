@@ -1,38 +1,3 @@
-/*
- * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-/*
- *
- *
- *
- *
- *
- * Written by Doug Lea with assistance from members of JCP JSR-166
- * Expert Group and released to the public domain, as explained at
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
-
 package java.util.concurrent.locks;
 
 import java.util.concurrent.TimeUnit;
@@ -58,6 +23,10 @@ import jdk.internal.vm.annotation.ReservedStackAccess;
  *   the lock is held in write mode, no read locks may be obtained,
  *   and all optimistic read validations will fail.
  *
+ *   可能阻止等待独占访问，返回一个可以在方法{@link#unlockWrite}中使用的戳来释放锁。
+ *   还提供了｛@code tryWriteLock｝的无定时和定时版本。当锁处于写模式时，
+ *   可能无法获得任何读锁，并且所有乐观读验证都将失败。
+ *   
  *  <li><b>Reading.</b> Method {@link #readLock} possibly blocks
  *   waiting for non-exclusive access, returning a stamp that can be
  *   used in method {@link #unlockRead} to release the lock. Untimed
@@ -111,9 +80,22 @@ import jdk.internal.vm.annotation.ReservedStackAccess;
  * into initial unlocked state, so they are not useful for remote
  * locking.
  *
+ *StampedLocks是为在开发线程安全组件时用作内部实用程序而设计的。
+ *它们的使用依赖于对它们所保护的数据、对象和方法的内部属性的了解。
+ *们是不可重入的，因此锁定的主体不应调用其他可能试图重新获取锁的未知方法
+ *（尽管您可以将戳传递给其他可以使用或转换它的方法）。
+ *读取锁定模式的使用依赖于相关联的代码部分是无副作用的。
+ *未经验证的乐观读取部分不能调用未知的方法来容忍潜在的不一致。
+ *
+ *邮票使用有限的表示，并且在加密方面不安全（即，有效的邮票可能是可猜测的）。
+ *邮票价值可在连续运行一年后（最早）回收。未经使用或验证而持有的印章超过此期限可能无法正确验证。
+ *StampedLocks是可序列化的，但总是反序列化到初始解锁状态，因此它们对远程锁定没有用处。
+ *
  * <p>Like {@link java.util.concurrent.Semaphore Semaphore}, but unlike most
  * {@link Lock} implementations, StampedLocks have no notion of ownership.
  * Locks acquired in one thread can be released or converted in another.
+ *
+ *StampedLocks没有所有权的概念。在一个线程中获取的锁可以在另一个线程释放或转换。
  *
  * <p>The scheduling policy of StampedLock does not consistently
  * prefer readers over writers or vice versa.  All "try" methods are
@@ -153,6 +135,8 @@ import jdk.internal.vm.annotation.ReservedStackAccess;
  *   private final StampedLock sl = new StampedLock();
  *
  *   // an exclusively locked method
+ *   <p>
+ *   完全锁定的方法
  *   void move(double deltaX, double deltaY) {
  *     long stamp = sl.writeLock();
  *     try {
@@ -466,6 +450,9 @@ public class StampedLock implements java.io.Serializable {
     /**
      * Exclusively acquires the lock, blocking if necessary
      * until available.
+     *
+     * <p>
+     * 独占获取锁，必要时阻止，直到可用为止。
      *
      * @return a write stamp that can be used to unlock or convert mode
      */
