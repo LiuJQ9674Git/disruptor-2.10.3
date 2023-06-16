@@ -23,6 +23,13 @@ import jdk.internal.misc.Unsafe;
  * #setState} and {@link #compareAndSetState} is tracked with respect
  * to synchronization.
  *
+ *提供一个框架，用于实现依赖先进先出（FIFO）等待队列的阻塞锁和相关同步器（信号量、事件等）。
+ *此类被设计为大多数类型的同步器的有用基础，这些同步器依赖于单个原子int值来表示状态。
+ *子类必须定义更改该状态的受保护方法，以及定义该状态在获取或释放该对象方面的含义。
+ *考虑到这些，类中的其他方法执行所有排队和阻塞机制。子类可以维护其他状态字段，
+ *但只有使用方法getState、setState和compareAndSetState操作的
+ *原子更新的int值才会相对于同步进行跟踪。
+ *
  * <p>Subclasses should be defined as non-public internal helper
  * classes that are used to implement the synchronization properties
  * of their enclosing class.  Class
@@ -31,6 +38,11 @@ import jdk.internal.misc.Unsafe;
  * {@link #acquireInterruptibly} that can be invoked as
  * appropriate by concrete locks and related synchronizers to
  * implement their public methods.
+ *
+ *子类应定义为非公共内部帮助类，用于实现其封闭类的同步属性。
+ *类AbstractQueuedSynchronizer没有实现任何同步接口。
+ *它定义了诸如acquireInterruptibly之类的方法，
+ *具体锁和相关同步器可以适当地调用这些方法来实现它们的公共方法。
  *
  * <p>This class supports either or both a default <em>exclusive</em>
  * mode and a <em>shared</em> mode. When acquired in exclusive mode,
@@ -45,6 +57,11 @@ import jdk.internal.misc.Unsafe;
  * {@link ReadWriteLock}. Subclasses that support only exclusive or
  * only shared modes need not define the methods supporting the unused mode.
  *
+ *此类支持默认的独占模式和共享模式之一或两者。
+ *在独占模式下获取时，其他线程尝试的获取无法成功。
+ *多个线程获取共享模式可能（但不一定）成功。通常，实现子类只支持其中一种模式，
+ *但两者都可以发挥作用。
+ *
  * <p>This class defines a nested {@link ConditionObject} class that
  * can be used as a {@link Condition} implementation by subclasses
  * supporting exclusive mode for which method {@link
@@ -57,6 +74,11 @@ import jdk.internal.misc.Unsafe;
  * condition, so if this constraint cannot be met, do not use it.  The
  * behavior of {@link ConditionObject} depends of course on the
  * semantics of its synchronizer implementation.
+ *
+ *此类定义了嵌套的ConditionObject类，该类可由支持独占模式的子类用作Condition实现，
+ *其中方法isHeldExclusive报告同步是否相对于当前线程独占，
+ *用当前getState值调用的方法release完全释放该对象，
+ *并获取，给定该保存的状态值，最终将该对象恢复到其先前获取的状态。
  *
  * <p>This class provides inspection, instrumentation, and monitoring
  * methods for the internal queue, as well as similar methods for
@@ -291,10 +313,19 @@ public abstract class AbstractQueuedSynchronizer
      * needs a signal (using LockSupport.unpark). Despite these
      * additions, we maintain most CLH locality properties.
      *
+     *等待队列是“CLH”（Craig、Landin和Hagersten）锁定队列的变体。
+     *CLH锁通常用于自旋锁spinlocks。我们通过包括显式（“prev”和“next”）
+     *指针和一个“status”字段来实现阻塞同步器，这种结构（status）
+     *使得节点在释放锁时向后续节点发送信号，并处理由于中断和超时而导致的取消。
+     *状态字段包括跟踪线程是否需要信号的位（使用LockSupport.unpark）。
+     *尽管有这些添加，我们仍保留了大多数CLH局部属性。
+     *
      * To enqueue into a CLH lock, you atomically splice it in as new
      * tail. To dequeue, you set the head field, so the next eligible
      * waiter becomes first.
      *
+     *要进入CLH锁的队列，可以将其原子性地拼接为新的尾部。要退出队列，
+     *您可以设置head字段，这样下一个符合条件的等候着将成为第一个。
      *  +------+  prev +-------+       +------+
      *  | head | <---- | first | <---- | tail |
      *  +------+       +-------+       +------+
@@ -312,6 +343,13 @@ public abstract class AbstractQueuedSynchronizer
      * status before blocking. The signaller atomically clears WAITING
      * status when unparking.
      *
+     *插入CLH队列只需要在“tail”上进行一次原子操作，因此从未排队到排队有一个简单的分界点。
+     *前一个线程（前一个任务）的“next”指针由排队线程在成功的CAS之后设置。
+     *
+     *即使是非原子的，这也足以确保任何被阻塞的线程在符合条件时都由前置线程发出信号
+     *（尽管在取消的情况下，可能借助方法cleanQueue中的信号）。
+     *信令部分基于类似Dekker的方案。
+     *
      * Dequeuing on acquire involves detaching (nulling) a node's
      * "prev" node and then updating the "head". Other threads check
      * if a node is or was dequeued by checking "prev" rather than
@@ -324,6 +362,11 @@ public abstract class AbstractQueuedSynchronizer
      * setting head field to ensure proper propagation. (Historical
      * note: This allows some simplifications and efficiencies
      * compared to previous versions of this class.)
+     *
+     *获取时的排队包括分离（置零）节点的“prev”节点，然后更新“head”。
+     *其他线程通过检查“prev”而不是head来检查节点是否已出列。
+     *如有必要，我们通过旋转等待来强制取消然后设置顺序。正因为如此，
+     *锁定算法本身并不是严格的“无锁定”，因为获取线程可能需要等待先前的获取才能取得进展。
      *
      * A node's predecessor can change due to cancellation while it is
      * waiting, until the node is first in queue, at which point it
@@ -339,6 +382,17 @@ public abstract class AbstractQueuedSynchronizer
      * (sometimes unnecessarily, but those cases are not worth
      * avoiding).
      *
+     *节点的前一个节点在等待时可能会由于取消而更改，直到该节点位于队列中的第一个节点，
+     *此时它无法更改。获取方法通过在等待之前重新检查“prev”来处理此问题。
+     *方法cleanQueue中的取消节点仅通过CAS修改prev和next字段。
+     *
+     *拆分策略让人想起Michael-Scott队列，在成功地将CAS发送到prev字段后，
+     *其他线程将帮助修复next字段。
+     *因为取消通常发生在使有关必要信号的决策复杂化的串中，
+     *所以每次对cleanQueue的调用都会遍历队列，直到进行干净的扫描。
+     *作为第一个重新组链（上链）的节点将无条件地unparked
+     *（有时是不必要的，但这些情况不值得避免）。
+     *
      * A thread may try to acquire if it is first (frontmost) in the
      * queue, and sometimes before.  Being first does not guarantee
      * success; it only gives the right to contend. We balance
@@ -351,6 +405,18 @@ public abstract class AbstractQueuedSynchronizer
      * spin; they instead interleave attempts to acquire with
      * bookkeeping steps. (Users who want spinlocks can use
      * tryAcquire.)
+     *
+     *在条件上等待的线程使用具有附加链（链表）的节点来维护（FIFO）条件列表。
+     *条件只需要链接简单（非并发）链接队列中的节点，因为只有在独占时才能访问这些节点。
+     *在等待时，一个节点被插入到一个条件队列中。一旦发出信号，节点就会在主队列中排队。
+     *一个特殊的状态字段值用于跟踪和原子触发此事件。
+     *
+     *对字段head、tail和state的访问使用完全Volatile模式以及CAS。
+     *节点字段status、prev和next也这样做，而线程可能是可信号的，
+     *但有时会使用较弱的模式。对字段“waiter”（要发出信号的线程）
+     *的访问总是夹在其他原子访问之间，因此在Plain模式中使用。
+     *我们使用jdk.internal Unsafe版本的原子访问方法，
+     *而不是VarHandles来避免潜在的VM引导问题。
      *
      * To improve garbage collectibility, fields of nodes not yet on
      * list are null. (It is not rare to create and then throw away a
