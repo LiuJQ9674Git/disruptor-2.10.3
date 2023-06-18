@@ -83,8 +83,9 @@ import java.util.function.Predicate;
  * the {@code ConcurrentLinkedQueue} in another thread.
  *
  *<p>
- *内存一致性影响：与其他并发集合一样，在将对象放入ConcurrentLinkedQueue之前，
- *线程中的操作发生在另一个线程中从ConcurrentLinkdQueue访问或删除该元素之后的操作之前。
+ *内存一致性影响：与其他并发集合一样，在一个线程中将对象放入ConcurrentLinkedQueue的动作，
+ *happen-before
+ *在另一个线程中从ConcurrentLinkdQueue访问或删除该元素之后的操作。
  *
  * <p>This class is a member of the
  * <a href="{@docRoot}/java.base/java/util/package-summary.html#CollectionsFramework">
@@ -153,8 +154,13 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * that is, we update head/tail when the current pointer appears
      * to be two or more steps away from the first/last node.
      *
+     * 头部和尾部都允许滞后。事实上，每次都不能更新它们是一个显著的优化（更少的CAS）。
+     * 我们使用两个松弛阈值；也就是说，当当前指针看起来距离第一个/最后一个节点两步或两步以上时，
+     * 我们更新head/tail。
+     * 
      * Since head and tail are updated concurrently and independently,
      * it is possible for tail to lag behind head (why not)?
+     * 既然头部和尾部是同时独立更新的，那么尾部有可能落后于头部？
      *
      * CASing a Node's item reference to null atomically removes the
      * element from the queue, leaving a "dead" node that should later
@@ -165,6 +171,12 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * any deleted nodes encountered during traversal.  See comments
      * in bulkRemove.
      *
+     * CASing将Node的item引用原子化地设置为null，来删除队列中的元素，
+     * 留下一个稍后应该下链unlinking的“死”节点（但unlinking只是一种优化）。
+     * 内部元素删除方法（而不是Iterator.remove（））在遍历期间跟踪前置任务（线程）节点，
+     * 以便可以节点以CAS-unlinked断开该节点。
+     * 一些遍历方法试图取消遍历过程中遇到的任何已删除节点的链接。
+     * 
      * When constructing a Node (before enqueuing it) we avoid paying
      * for a volatile write to item.  This allows the cost of enqueue
      * to be "one-and-a-half" CASes.
@@ -175,6 +187,10 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * Node with null item.  Both head and tail are only updated using
      * CAS, so they never regress, although again this is merely an
      * optimization.
+     *
+     * 头和尾可以指向也可以不指向具有非空的数据item的节点。如果队列为空，
+     * 那么所有item当然都必须为空。创建时，头和尾都引用了一个具有null的item的虚拟节点。
+     * 头部和尾部都只使用CAS更新，所以它们永远不会回收，尽管这只是一个优化。
      */
 
     static final class Node<E> {
@@ -184,6 +200,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         /**
          * Constructs a node holding item.  Uses relaxed write because
          * item can only be seen after piggy-backing publication via CAS.
+         * 之后通过CAS方式发布
          */
         Node(E item) {
             ITEM.set(this, item);
@@ -198,6 +215,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
             NEXT.set(this, next);
         }
 
+        //数据变化，原子设置
         boolean casItem(E cmp, E val) {
             // assert item == cmp || item == null;
             // assert cmp != null;
@@ -349,29 +367,51 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      */
     public boolean offer(E e) {
         final Node<E> newNode = new Node<E>(Objects.requireNonNull(e));
-
+        //t:tail p:t
         for (Node<E> t = tail, p = t;;) {
-            Node<E> q = p.next;
-            if (q == null) {
+            //q指向链表队尾的next，在稳定状态时，q应当为null
+            //当把p添加到队列上，即执行Next原子设置时，
+            //
+            Node<E> q = p.next; //q是p的next指向的节点
+            if (q == null) {//q为空，p是tail.next。在稳态时，q应当为null
                 // p is last node
-                if (NEXT.compareAndSet(p, null, newNode)) {
+                // 把tail.next从null设置为新建节点
+                if (NEXT.compareAndSet(p, null, newNode)) {//Node节点
                     // Successful CAS is the linearization point
                     // for e to become an element of this queue,
                     // and for newNode to become "live".
+                    // 新节点加在了队列上，此时tail设置为新建节点
+                    // p的next指向新节点时，p不等于t
+                    // 在p没有变化时，存在p==t的情况
+                    // 或者两者都指向newNode,也存在p==t的情况
+                    // 此时尾部不是原来的t值
                     if (p != t) // hop two nodes at a time; failure is OK
                         TAIL.weakCompareAndSet(this, t, newNode);
-                    return true;
+                    return true; //只要把p的.next设置为新节点成功则返回
                 }
                 // Lost CAS race to another thread; re-read next
             }
-            else if (p == q)
+            //cas操作包括NEXT.cas和TAIL的.cas 失败，非稳态，执行下面操作，
+            //p.next和p相等，
+            //Next把p的下个节点设置为newNode，而tail也设置了newNode
+            //这种中间态存在p==q,
+            else if (p == q) 
                 // We have fallen off list.  If tail is unchanged, it
                 // will also be off-list, in which case we need to
                 // jump to head, from which all live nodes are always
                 // reachable.  Else the new tail is a better bet.
+                // p和q已经不指向从列表，
+                // 如果tail保持不变，它也将不在列表中，
+                // 在这种情况下，我们需要跳到head，从head可以始终访问所有在线的节点。
+                // 否则，新tail是更好的选择。
+                // t改变了，即tail设置了新节点，此时t不是原来的tail
+                // tail赋予t,当t和tail不是一个值时，则返回真
                 p = (t != (t = tail)) ? t : head;
-            else
+            else 
+                //Next原子把p指向新节点时， p.next则不是原来tail的next
                 // Check for tail updates after two hops.
+                // p不是为t节点,二者在节点构造中已经分离，，t也不是
+               
                 p = (p != t && t != (t = tail)) ? t : q;
         }
     }
