@@ -25,7 +25,7 @@ public class StampedLock implements java.io.Serializable {
     * WBIT ->:	128	    Bit->:	   1000 0000
     * RFULL->:	126	    Bit->:	   0111 1110
     * ABITS->:	255	    Bit->:	   1111 1111
-    *             -256         1 1 0000 0000
+    *          -256            1 1 0000 0000
     * RBITS->:	127	    Bit->:	   0111 1111
     * SBITS->:	-128	Bit->:   1 1000 0000 取反
     * SAFE_->:	192	    Bit->:	   1100 0000
