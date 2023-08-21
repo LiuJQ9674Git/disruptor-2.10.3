@@ -25,6 +25,9 @@ import java.util.concurrent.locks.Condition;
  * from non-{@code ForkJoinTask} clients, as well as management and
  * monitoring operations.
  *
+ * 用于运行ForkJoinTasks的ExecutorService。
+ * ForkJoinPool为来自非ForkJoinTask客户端的提交以及管理和监视操作提供了入口点。
+ *
  * <p>A {@code ForkJoinPool} differs from other kinds of {@link
  * ExecutorService} mainly by virtue of employing
  * <em>work-stealing</em>: all threads in the pool attempt to find and
@@ -38,12 +41,25 @@ import java.util.concurrent.locks.Condition;
  * tasks that are never joined. All worker threads are initialized
  * with {@link Thread#isDaemon} set {@code true}.
  *
+ * ForkJoinPool与其他类型的ExecutorService的区别主要在于采用了工作窃取：
+ * 池中的所有线程都试图找到并执行提交到池中和/或由其他活动任务创建的任务
+ * （如果不存在，则最终阻止等待工作）。
+ * 当大多数任务产生其他子任务时（就像大多数ForkJoinTasks一样），
+ * 以及当许多小任务从外部客户端提交到池时，这可以实现高效处理。
+ * 特别是当在构造函数中将asyncMode设置为true时，
+ * ForkJoinPools可能也适用于从未联接的事件样式任务。
+ * 所有工作线程都使用Thread.isDemon设置为true进行初始化。
+ * 
  * <p>A static {@link #commonPool()} is available and appropriate for
  * most applications. The common pool is used by any ForkJoinTask that
  * is not explicitly submitted to a specified pool. Using the common
  * pool normally reduces resource usage (its threads are slowly
  * reclaimed during periods of non-use, and reinstated upon subsequent
  * use).
+ *
+ * 静态commonPool是可用的，适用于大多数应用程序。
+ * 公共池由任何未明确提交到指定池的ForkJoinTask使用。
+ * 使用公共池通常会减少资源使用量（其线程在不使用期间会慢慢回收，并在后续使用时恢复）。
  *
  * <p>For applications that require separate or custom pools, a {@code
  * ForkJoinPool} may be constructed with a given target parallelism
@@ -58,6 +74,14 @@ import java.util.concurrent.locks.Condition;
  * overridden using a constructor with parameters corresponding to
  * those documented in class {@link ThreadPoolExecutor}.
  *
+ * 对于需要单独或自定义池的应用程序，可以使用给定的目标并行度级别构建ForkJoinPool；
+ * 默认情况下等于可用处理器的数量。池试图通过动态添加、挂起或恢复内部工作线程来
+ * 维护足够的活动（或可用）线程，即使某些任务已暂停等待加入其他任务。
+ * 但是，面对阻塞的I/O或其他非托管同步，不能保证进行此类调整。
+ * 嵌套的ForkJoinPool.ManagedBlocker接口可以扩展所容纳的同步类型。
+ * 默认策略可以使用构造函数重写，
+ * 该构造函数的参数与ThreadPoolExecutor类中记录的参数相对应。
+ * 
  * <p>In addition to execution and lifecycle control methods, this
  * class provides status check methods (for example
  * {@link #getStealCount}) that are intended to aid in developing,
@@ -65,6 +89,10 @@ import java.util.concurrent.locks.Condition;
  * {@link #toString} returns indications of pool state in a
  * convenient form for informal monitoring.
  *
+ * 除了执行和生命周期控制方法外，这个类还提供了状态检查方法（例如getStealCount），
+ * 用于帮助开发、调优和监视fork/join应用程序。
+ * 此外，方法toString以一种方便的形式返回池状态的指示，用于非正式监视。
+ * 
  * <p>As is the case with other ExecutorServices, there are three
  * main task execution methods summarized in the following table.
  * These are designed to be used primarily by clients not already
@@ -77,6 +105,12 @@ import java.util.concurrent.locks.Condition;
  * async event-style tasks that are not usually joined, in which case
  * there is little difference among choice of methods.
  *
+ * 与其他ExecutorServices的情况一样，下表中总结了三种主要的任务执行方法。
+ * 这些设计主要用于尚未在当前池中参与fork/join计算的客户端。
+ * 这些方法的主要形式接受ForkJoinTask的实例，
+ * 但重载的形式也允许混合执行普通的基于Runnable或Callable的活动。
+ * 然而，已经在池中执行的任务通常应该使用表中列出的内部计算形式，
+ * 除非使用通常不连接的异步事件样式任务，在这种情况下，方法的选择几乎没有差异。
  * <table class="plain">
  * <caption>Summary of task execution methods</caption>
  *  <tr>
