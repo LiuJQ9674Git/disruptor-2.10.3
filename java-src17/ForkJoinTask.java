@@ -1,38 +1,3 @@
-/*
- * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-/*
- *
- *
- *
- *
- *
- * Written by Doug Lea with assistance from members of JCP JSR-166
- * Expert Group and released to the public domain, as explained at
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
-
 package java.util.concurrent;
 
 import java.io.Serializable;
@@ -51,6 +16,9 @@ import java.util.concurrent.locks.LockSupport;
  * subtasks may be hosted by a small number of actual threads in a
  * ForkJoinPool, at the price of some usage limitations.
  *
+ * 在｛@link ForkJoinPool｝中运行的任务的抽象基类。｛ForkJoinTask｝是一个类似线程的实体，其重量比普通线程轻得多。
+ * 大量的任务和子任务可能由ForkJoinPool中的少量实际线程托管，代价是一些使用限制。
+ * 
  * <p>A "main" {@code ForkJoinTask} begins execution when it is
  * explicitly submitted to a {@link ForkJoinPool}, or, if not already
  * engaged in a ForkJoin computation, commenced in the {@link
@@ -64,6 +32,13 @@ import java.util.concurrent.locks.LockSupport;
  * advanced usages, as well as extension mechanics that allow support
  * of new forms of fork/join processing.
  *
+ * “main”｛ForkJoinTask｝在
+ * 显式提交到｛ForkJoinPool｝，或者，如果尚未参与ForkJoin计算，
+ * 则通过fork、invoke或相关方法在｛fork JoinPool#commonPool（）｝中启动。
+ * 一旦启动，它通常会依次启动其他子任务。正如这个类的名称所示，许多使用｛ForkJoinTask｝的程序只使用方法｛fork｝和｛join｝，
+ * 或派生方法，如｛invokeAll（ForkJoinTask…）invokeAll｝。
+ * 然而，这个类还提供了许多其他可以在高级用法中发挥作用的方法，以及允许支持新形式的fork/join处理的扩展机制。
+ *  
  * <p>A {@code ForkJoinTask} is a lightweight form of {@link Future}.
  * The efficiency of {@code ForkJoinTask}s stems from a set of
  * restrictions (that are only partially statically enforceable)
@@ -78,7 +53,15 @@ import java.util.concurrent.locks.LockSupport;
  * cooperate with fork/join scheduling. Subdividable tasks should also
  * not perform blocking I/O, and should ideally access variables that
  * are completely independent of those accessed by other running
- * tasks. These guidelines are loosely enforced by not permitting
+ * tasks.
+ *
+ * ｛@code ForkJoinTask｝是｛@link Future｝的轻量级形式。{@codeForkJoinTask}的效率源于一组限制（仅部分静态可执行），
+ * 反映了它们主要用作计算纯函数或在纯隔离对象上操作的计算任务。
+ * 主要的协调机制是安排异步执行的｛@link#fork｝和在计算任务结果之前不进行的｛@link#join｝。
+ * 理想情况下，计算应该避免{@code-synchronized}方法或块，并且除了加入其他任务或使用同步器（如宣传与fork/join调度合作的Phasers）之外，
+ * 还应该最大限度地减少其他块同步。可细分任务也不应执行阻塞I/O，理想情况下应访问完全独立于其他运行任务访问的变量的变量。
+ *
+ * These guidelines are loosely enforced by not permitting
  * checked exceptions such as {@code IOExceptions} to be
  * thrown. However, computations may still encounter unchecked
  * exceptions, that are rethrown to callers attempting to join
@@ -91,6 +74,13 @@ import java.util.concurrent.locks.LockSupport;
  * that initiated the computation as well as the thread actually
  * encountering the exception; minimally only the latter.
  *
+ * 这些准则是通过不允许抛出｛@code IOExceptions｝等已检查异常来松散地执行的。
+ * 然而，计算可能仍然会遇到未检查的异常，这些异常会重新抛出给试图加入它们的调用方。
+ * 这些异常可能还包括源于内部资源耗尽的｛@link RejectedExecutionException｝，例如未能分配内部任务队列。
+ * Rethrown异常的行为方式与常规异常相同，
+ * 但在可能的情况下，包含启动计算的线程和实际遇到异常的线程的堆栈跟踪
+ * （例如使用{@code ex.printStackTrace（）}显示）；至少只有后者。
+ * 
  * <p>It is possible to define and use ForkJoinTasks that may block,
  * but doing so requires three further considerations: (1) Completion
  * of few if any <em>other</em> tasks should be dependent on a task
@@ -105,6 +95,14 @@ import java.util.concurrent.locks.LockSupport;
  * enough threads will be available to ensure progress or good
  * performance.
  *
+ * 可以定义和使用可能阻塞的ForkJoinTasks，但这样做需要进一步考虑三个因素：
+ * （1）完成少数（如果有的话）<em>其他</em>任务应取决于阻塞外部同步或I/O的任务。
+ * 从未加入的事件式异步任务（例如，那些子类化{@linkCountedCompleter}）通常属于这一类。
+ * （2） 为了尽量减少对资源的影响，任务应该很小；理想情况下仅执行（可能的）阻塞动作。
+ * （3） 除非使用｛@link ForkJoinPool.ManagedBlocker｝API，
+ * 或者已知可能被阻止的任务数小于池的｛@link ForkJoinPool#getParallelism｝级别，
+ * 否则池无法保证有足够的线程可用以确保进度或良好性能。
+ * 
  * <p>The primary method for awaiting completion and extracting
  * results of a task is {@link #join}, but there are several variants:
  * The {@link Future#get} methods support interruptible and/or timed
@@ -119,6 +117,13 @@ import java.util.concurrent.locks.LockSupport;
  * performs the most common form of parallel invocation: forking a set
  * of tasks and joining them all.
  *
+ * 等待完成和提取任务结果的主要方法是{@link#join}，但有几种变体：
+ * {@linkFuture#get}方法支持可中断和/或定时等待完成，并使用{@codeFuture}约定报告结果。
+ * 方法｛@link#invoke｝在语义上等效于｛@code fork（）；join（）｝，
+ * 但总是尝试在当前线程中开始执行。这些方法的“<em>quiet</em>”形式不会提取结果或报告异常。
+ * 当一组任务正在执行，并且您需要将结果或异常的处理延迟到全部完成时，这些可能会很有用。
+ * 方法｛@code invokeAll｝（有多个版本）执行最常见的并行调用形式：派生一组任务并将它们全部联接。
+ * 
  * <p>In the most typical usages, a fork-join pair act like a call
  * (fork) and return (join) from a parallel recursive function. As is
  * the case with other forms of recursive calls, returns (joins)
@@ -126,6 +131,10 @@ import java.util.concurrent.locks.LockSupport;
  * b.fork(); b.join(); a.join();} is likely to be substantially more
  * efficient than joining {@code a} before {@code b}.
  *
+ * 在最典型的用法中，fork-join对的作用类似于并行递归函数的调用（fork）和返回（join）。
+ * 与其他形式的递归调用一样，返回（联接）应该首先在最里面执行。
+ * 例如，{@code a.fork（）；b.fork}。
+ * 
  * <p>The execution status of tasks may be queried at several levels
  * of detail: {@link #isDone} is true if a task completed in any way
  * (including the case where a task was cancelled without executing);
@@ -138,6 +147,13 @@ import java.util.concurrent.locks.LockSupport;
  * #getException} will return either the encountered exception or
  * {@link CancellationException}.
  *
+ * 任务的执行状态可以在多个详细级别上查询：如果任务以任何方式完成（包括任务在未执行的情况下被取消），
+ * 则{@link#isDone}为true；｛@link#isCompletedNormally｝如果任务在未取消或遇到异常的情况下完成，则为true；
+ * 如果任务被取消，则｛@link#isCancelled｝为true
+ * （在这种情况下，｛@link#getException｝返回｛@link CancellationException｝）；
+ * 如果任务被取消或遇到异常，则｛@link#isCompletedAbnormally｝为true，
+ * 在这种情况下，｛@link#getException｝将返回遇到的异常或｛@link CancellationException｝。
+ *
  * <p>The ForkJoinTask class is not usually directly subclassed.
  * Instead, you subclass one of the abstract classes that support a
  * particular style of fork/join processing, typically {@link
@@ -149,11 +165,23 @@ import java.util.concurrent.locks.LockSupport;
  * then defines a {@code compute} method that somehow uses the control
  * methods supplied by this base class.
  *
+ * ForkJoinTask类通常不直接进行子类化。相反，您可以为支持特定类型的fork/join处理的抽象类中的一个进行子类化，
+ * 通常｛@link RecursiveAction｝用于大多数不返回结果的计算，
+ * ｛@link RecursiveTask｝用于那些返回结果的计算，｛@link CountedCompleter｝用于完成的操作触发其他操作的计算。
+ * 通常，一个具体的ForkJoinTask子类声明在构造函数中建立的包含其参数的字段，
+ * 然后定义一个{@code-computer}方法，该方法以某种方式使用该基类提供的控制方法。
+ * 
  * <p>Method {@link #join} and its variants are appropriate for use
  * only when completion dependencies are acyclic; that is, the
  * parallel computation can be described as a directed acyclic graph
  * (DAG). Otherwise, executions may encounter a form of deadlock as
- * tasks cyclically wait for each other.  However, this framework
+ * tasks cyclically wait for each other.
+ *
+ * 方法｛@link#join｝及其变体仅适用于完成依赖关系是非循环的时；
+ * 也就是说，并行计算可以被描述为有向无环图（DAG）。
+ * 否则，由于任务循环地相互等待，执行可能会遇到某种形式的死锁。
+ * 
+ * However, this framework
  * supports other methods and techniques (for example the use of
  * {@link Phaser}, {@link #helpQuiesce}, and {@link #complete}) that
  * may be of use in constructing custom subclasses for problems that
@@ -161,7 +189,16 @@ import java.util.concurrent.locks.LockSupport;
  * ForkJoinTask may be atomically <em>tagged</em> with a {@code short}
  * value using {@link #setForkJoinTaskTag} or {@link
  * #compareAndSetForkJoinTaskTag} and checked using {@link
- * #getForkJoinTaskTag}. The ForkJoinTask implementation does not use
+ * #getForkJoinTaskTag}.
+ *
+ * 然而，该框架支持其他方法和技术（例如使用{@link-Phaser}、
+ * {@link#helpQuiesce}和{@link#complete}），
+ * 这些方法和技术可能在为未静态结构化为DAG的问题构建自定义子类时有用。
+ * 为了支持这种用法，可以使用｛@link#setForkJoinTaskTag｝或
+ * ｛@link#compareAndSetForkJoinTaskTag｝用｛@code short｝
+ * 值原子地＜em＞标记ForkJoinTask，并使用｛@link#getForkJoinaskTag｝进行检查。
+ *
+ * The ForkJoinTask implementation does not use
  * these {@code protected} methods or tags for any purpose, but they
  * may be of use in the construction of specialized subclasses.  For
  * example, parallel graph traversals can use the supplied methods to
@@ -169,6 +206,11 @@ import java.util.concurrent.locks.LockSupport;
  * (Method names for tagging are bulky in part to encourage definition
  * of methods that reflect their usage patterns.)
  *
+ * ForkJoinTask实现不将这些{@code-protected}方法或标记用于任何目的，
+ * 但它们可能在构建专门的子类时有用。
+ * 例如，并行图遍历可以使用提供的方法来避免重新访问已经处理的节点/任务。
+ * （标记的方法名称庞大，部分原因是为了鼓励定义反映其使用模式的方法。）
+ * 
  * <p>Most base support methods are {@code final}, to prevent
  * overriding of implementations that are intrinsically tied to the
  * underlying lightweight task scheduling framework.  Developers
@@ -179,6 +221,11 @@ import java.util.concurrent.locks.LockSupport;
  * subclasses, possibly relying on other {@code protected} methods
  * provided by this class.
  *
+ * 大多数基本支持方法都是{@code-final}，以防止重写本质上与底层轻量级任务调度框架相关的实现。
+ * 创建新的fork/join处理基本样式的开发人员应至少实现｛@code-protected｝方法｛@link#exec｝、
+ * ｛@link#setRawResult｝和｛@link#getRawResult｝，
+ * 同时引入一种可以在其子类中实现的抽象计算方法，可能依赖于此类提供的其他｛@code protected｝方法。
+ * 
  * <p>ForkJoinTasks should perform relatively small amounts of
  * computation. Large tasks should be split into smaller subtasks,
  * usually via recursive decomposition. As a very rough rule of thumb,
@@ -188,16 +235,28 @@ import java.util.concurrent.locks.LockSupport;
  * small, then memory and internal task maintenance overhead may
  * overwhelm processing.
  *
+ * ForkJoinTasks应该执行相对少量的计算。大型任务应划分为较小的子任务，通常通过递归分解。
+ * 作为一个非常粗略的经验法则，一个任务应该执行100到10000个基本计算步骤，
+ * 并且应该避免不确定的循环。如果任务太大，那么并行性就无法提高吞吐量。
+ * 如果太小，那么内存和内部任务维护开销可能会使处理不堪重负。
+ * 
  * <p>This class provides {@code adapt} methods for {@link Runnable}
  * and {@link Callable}, that may be of use when mixing execution of
  * {@code ForkJoinTasks} with other kinds of tasks. When all tasks are
  * of this form, consider using a pool constructed in <em>asyncMode</em>.
  *
+ * 这个类为{@linkRunnable}和{@linkCallable}提供了{@code-adapt}方法，
+ * 当将{@codeForkJoinTask}的执行与其他类型的任务混合使用时，
+ * 这些方法可能会有用。当所有任务都是这种形式时，请考虑使用在asyncMode中构建的池。
+ * 
  * <p>ForkJoinTasks are {@code Serializable}, which enables them to be
  * used in extensions such as remote execution frameworks. It is
  * sensible to serialize tasks only before or after, but not during,
  * execution. Serialization is not relied on during execution itself.
  *
+ * ForkJoinTasks是{@codeSerializable}，这使它们能够用于远程执行框架等扩展。
+ * 明智的做法是只在执行之前或之后序列化任务，而不是在执行期间序列化。在执行过程中不依赖序列化。
+ * 
  * @since 1.7
  * @author Doug Lea
  */
@@ -209,12 +268,18 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      * responsible for maintaining their "status" field amidst relays
      * to methods in ForkJoinWorkerThread and ForkJoinPool.
      *
+     * 有关一般实现概述，请参阅ForkJoinPool类的内部文档。
+     * ForkJoinTasks主要负责在ForkJoinWorkerThread和ForkJoinPool中的方法中继中维护其“状态”字段。
+     * 
      * The methods of this class are more-or-less layered into
-     * (1) basic status maintenance
-     * (2) execution and awaiting completion
-     * (3) user-level methods that additionally report results.
+     * 这个类的方法或多或少被分层为
+     * (1) basic status maintenance 基本状态维护
+     * (2) execution and awaiting completion 执行和等待完成
+     * (3) user-level methods that additionally report results. 额外报告结果的用户级方法。
      * This is sometimes hard to see because this file orders exported
      * methods in a way that flows well in javadocs.
+     *
+     * 这有时很难看到，因为该文件以在javadocs中良好流动的方式对导出的方法进行排序。
      *
      * Revision notes: The use of "Aux" field replaces previous
      * reliance on a table to hold exceptions and synchronized blocks
@@ -226,15 +291,22 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      * exception (never both). Waiting threads prepend nodes
      * Treiber-stack-style.  Signallers detach and unpark
      * waiters. Cancelled waiters try to unsplice.
+     *
+     * 等待完成或持有抛出异常的线程的节点（决不能两者都有）。
+     * 等待线程准备节点Treeber堆栈样式。信号员将线程分开，并为其解封。取消服务的服务员试图解开。
      */
     static final class Aux {
         final Thread thread;
-        final Throwable ex;  // null if a waiter
+        final Throwable ex;  // null if a waiter 如果服务者（线程）为null
+        
+        // 仅通过内存获取链访问
         Aux next;            // accessed only via memory-acquire chains
         Aux(Thread thread, Throwable ex) {
             this.thread = thread;
             this.ex = ex;
         }
+        
+        // 仅用于取消
         final boolean casNext(Aux c, Aux v) { // used only in cancellation
             return NEXT.compareAndSet(this, c, v);
         }
@@ -258,16 +330,20 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      * ABNORMAL without DONE signifies an interrupted wait.  These
      * control bits occupy only (some of) the upper half (16 bits) of
      * status field. The lower bits are used for user-defined tags.
+     *
+     * 状态字段将位打包到单个int中，以确保原子性。
+     * 状态最初为零，在完成之前采用非负值，在此基础上保持（符号位）DONE，可能带有ABNORMAL（已取消或异常）和THROWN（在这种情况下已存储异常）。
+     * 值ABNORMAL without DONE表示等待中断。这些控制位仅占据状态字段的上半部分（16位）。低位用于用户定义的标记。
      */
-    private static final int DONE         = 1 << 31; // must be negative
+    private static final int DONE         = 1 << 31; // must be negative 必须为负数
     private static final int ABNORMAL     = 1 << 16;
     private static final int THROWN       = 1 << 17;
-    private static final int SMASK        = 0xffff;  // short bits for tags
-    private static final int UNCOMPENSATE = 1 << 16; // helpJoin return sentinel
+    private static final int SMASK        = 0xffff;  // short bits for tags 标签的短位
+    private static final int UNCOMPENSATE = 1 << 16; // helpJoin return sentinel helpJoin返回哨兵
 
     // Fields
-    volatile int status;                // accessed directly by pool and workers
-    private transient volatile Aux aux; // either waiters or thrown Exception
+    volatile int status;                // accessed directly by pool and workers 池和工作者(线程)直接访问
+    private transient volatile Aux aux; // either waiters or thrown Exception 服务者（线程）或引发异常
 
     // Support for atomic operations
     private static final VarHandle STATUS;
@@ -282,13 +358,16 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
         return AUX.compareAndSet(this, c, v);
     }
 
-    /** Removes and unparks waiters */
+    /**
+     * Removes and unparks waiters
+     * 删除和取消标记服务者（线程）
+    */
     private void signalWaiters() {
         for (Aux a; (a = aux) != null && a.ex == null; ) {
-            if (casAux(a, null)) {             // detach entire list
+            if (casAux(a, null)) {             // detach entire list 分离整个列表
                 for (Thread t; a != null; a = a.next) {
                     if ((t = a.thread) != Thread.currentThread() && t != null)
-                        LockSupport.unpark(t); // don't self-signal
+                        LockSupport.unpark(t); // don't self-signal 不要自发信号
                 }
                 break;
             }
@@ -308,6 +387,9 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
     /**
      * Sets ABNORMAL DONE status unless already done, and wakes up threads
      * waiting to join this task.
+     *
+     * 设置ABNORMAL DONE状态，除非已经完成，并唤醒等待加入此任务的线程。
+     * 
      * @return status on exit
      */
     private int trySetCancelled() {
@@ -323,6 +405,9 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      * If losing a race with setDone or trySetCancelled, the exception
      * may be recorded but not reported.
      *
+     * 记录异常并设置异常抛出完成状态（除非已经完成），并唤醒等待加入此任务的线程。
+     * 如果使用setDone或trySetCancelled输掉比赛，则可能会记录但不会报告异常。
+     * 
      * @return status on exit
      */
     final int trySetThrown(Throwable ex) {
@@ -344,7 +429,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
 
     /**
      * Records exception unless already done. Overridable in subclasses.
-     *
+     * 记录异常，除非已完成。在子类中可重写。
      * @return status on exit
      */
     int trySetException(Throwable ex) {
@@ -363,6 +448,8 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
     /**
      * Unless done, calls exec and records status if completed, but
      * doesn't wait for completion otherwise.
+     *
+     * 除非完成，否则调用exec并在完成时记录状态，否则不等待完成。
      *
      * @return status on exit from this method
      */
@@ -385,11 +472,23 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      * Helps and/or waits for completion from join, get, or invoke;
      * called from either internal or external threads.
      *
+     * 从join、get或invoke帮助和/或等待完成；从内部或外部线程调用。
+     * 
      * @param pool if nonnull, known submitted pool, else assumes current pool
+     *          池如果为非null，则为已知已提交池，否则为当前池
+     *          
      * @param ran true if task known to have been exec'd
+     *          如果已知任务已执行，则运行true
+     *          
      * @param interruptible true if park interruptibly when external
+     *          可中断true如果驻车可中断当外部
+     *          
      * @param timed true if use timed wait
+     *          timed true如果使用timed wait
+     *          
      * @param nanos if timed, timeout value
+     *          nanos如果超时，则超时值
+     *          
      * @return ABNORMAL if interrupted, else status on exit
      */
     private int awaitDone(ForkJoinPool pool, boolean ran,
@@ -427,6 +526,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
         boolean uncompensate = false;
         if (q != null && p != null) {  // try helping
             // help even in timed mode if pool has no parallelism
+            // 如果池没有并行性，即使在定时模式下也有帮助
             boolean canHelp = !timed || (p.mode & SMASK) == 0;
             if (canHelp) {
                 if ((this instanceof CountedCompleter) &&
@@ -444,6 +544,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
             }
         }
         // block until done or cancelled wait
+        // 阻止，直到完成或取消等待
         boolean interrupted = false, queued = false;
         boolean parked = false, fail = false;
         Aux node = null;
@@ -487,6 +588,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
 
         if (queued) {
             LockSupport.setCurrentBlocker(null);
+            // 取消类似于AbstractQueuedSynchronizer
             if (s >= 0) { // cancellation similar to AbstractQueuedSynchronizer
                 outer: for (Aux a; (a = aux) != null && a.ex == null; ) {
                     for (Aux trail = null;;) {
@@ -495,7 +597,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
                             if (trail != null)
                                 trail.casNext(trail, next);
                             else if (casAux(a, next))
-                                break outer; // cannot be re-encountered
+                                break outer; // cannot be re-encountered 无法再次遇到
                             break;           // restart
                         } else {
                             trail = a;
@@ -506,7 +608,7 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
                 }
             }
             else {
-                signalWaiters();             // help clean or signal
+                signalWaiters();             // help clean or signal 帮助清洁或发出信号
                 if (interrupted)
                     Thread.currentThread().interrupt();
             }
