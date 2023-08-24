@@ -47,7 +47,7 @@ import java.util.concurrent.locks.Condition;
  * 当大多数任务产生其他子任务时（就像大多数ForkJoinTasks一样），
  * 以及当许多小任务从外部客户端提交到池时，这可以实现高效处理。
  * 特别是当在构造函数中将asyncMode设置为true时，
- * ForkJoinPools可能也适用于从未联接的事件样式任务。
+ * ForkJoinPools可能也适用于从未联接（join）的事件样式任务。
  * 所有工作线程都使用Thread.isDemon设置为true进行初始化。
  * 
  * <p>A static {@link #commonPool()} is available and appropriate for
@@ -58,8 +58,8 @@ import java.util.concurrent.locks.Condition;
  * use).
  *
  * 静态commonPool是可用的，适用于大多数应用程序。
- * 公共池由任何未明确提交到指定池的ForkJoinTask使用。
- * 使用公共池通常会减少资源使用量（其线程在不使用期间会慢慢回收，并在后续使用时恢复）。
+ * 公共池（common pool）由任何未明确提交到指定池的ForkJoinTask使用。
+ * 使用公共池（common pool）通常会减少资源使用量（其线程在不使用期间会慢慢回收，并在后续使用时恢复）。
  *
  * <p>For applications that require separate or custom pools, a {@code
  * ForkJoinPool} may be constructed with a given target parallelism
@@ -74,7 +74,8 @@ import java.util.concurrent.locks.Condition;
  * overridden using a constructor with parameters corresponding to
  * those documented in class {@link ThreadPoolExecutor}.
  *
- * 对于需要单独或自定义池的应用程序，可以使用给定的目标并行度级别构建ForkJoinPool；
+ * 对于需要单独或自定义池的（require separate or custom pools）应用程序，
+ * 可以使用给定的目标并行度级别构建ForkJoinPool；
  * 默认情况下等于可用处理器的数量。池试图通过动态添加、挂起或恢复内部工作线程来
  * 维护足够的活动（或可用）线程，即使某些任务已暂停等待加入其他任务。
  * 但是，面对阻塞的I/O或其他非托管同步，不能保证进行此类调整。
@@ -111,7 +112,18 @@ import java.util.concurrent.locks.Condition;
  * 但重载的形式也允许混合执行普通的基于Runnable或Callable的活动。
  * 然而，已经在池中执行的任务通常应该使用表中列出的内部计算形式，
  * 除非使用通常不连接的异步事件样式任务，在这种情况下，方法的选择几乎没有差异。
- * 
+ *
+ * 三种方法为：
+ * 1.Arrange async execution  execute(ForkJoinTask) ForkJoinTask.fork
+ *
+ * 2.Await and obtain result  invoke(ForkJoinTask)  ForkJoinTask.invoke
+ *
+ * 3. Arrange exec and obtain Future submit(ForkJoinTask)
+ *                                  ForkJoinTask.fork (ForkJoinTasks are Futures)
+ *
+ * The parameters used to construct the common pool may be controlled
+ * by setting the following system properties:
+                                 
  * If no thread factory is supplied via a system property, then the
  * common pool uses a factory that uses the system class loader as the
  * {@linkplain Thread#getContextClassLoader() thread context class loader}.
@@ -169,8 +181,9 @@ public class ForkJoinPool extends AbstractExecutorService {
      * queues.  This framework began as vehicle for supporting
      * tree-structured parallelism using work-stealing.
      *
-     * 这个类及其嵌套类为一组工作线程提供了主要功能和控制：来自非FJ线程的提交进入提交队列。
-     * 工作人员接受这些任务，通常会将它们拆分为可能被其他工作人员窃取的子任务。
+     * 这个类及其嵌套类为一组工作线程提供了主要功能和控制：
+     * 来自非FJ线程的提交进入提交队列。
+     * 工作者（线程）接受这些任务会将它们拆分为可能被其他工作者（线程）窃取的子任务。
      * 基于随机扫描的工作窃取通常比生产者将任务分配给空闲线程的“工作处理”能带来更好的吞吐量，
      * 部分原因是在发出信号的线程唤醒（可能需要很长时间）之前完成了其他任务的线程可以接受任务。
      * 偏好规则优先处理自己队列中的任务（LIFO或FIFO，取决于模式），
@@ -203,11 +216,11 @@ public class ForkJoinPool extends AbstractExecutorService {
      * more detail before proceeding.)
      *
      * 大多数操作都发生在工作窃取队列中（在嵌套类WorkQueue中）。
-     * 这些是Deques的特殊形式，只支持四种可能的结束操作中的三种——推送、弹出和轮询（也称为窃取），
-     * 但进一步的限制是，推送和弹出只能从所属线程调用（或者，如这里扩展的，在锁下），
-     * 而轮询可以从其他线程调用。（
-     * 如果你不熟悉它们，你可能想在继续之前阅读Herlihy和Shavit的书《多处理器编程的艺术》，
-     * 第16章更详细地描述了这些。）
+     * 这些是Deques的特殊形式，只支持四种可能的结束操作中的三种，
+     * 即推送push、弹出pop和轮询poll（也称为窃取steal），
+     * 但进一步的限制是，推送push和弹出pop只能从所属（owning）线程调用（或者，在锁下情况下扩展），
+     * 而轮询poll可以从其他线程调用。
+     * （如果你不熟悉它们，《多处理器编程的艺术》，第16章更详细地描述了这些。）
      * 
      * The main work-stealing queue
      * design is roughly similar to those in the papers "Dynamic
@@ -225,11 +238,12 @@ public class ForkJoinPool extends AbstractExecutorService {
      *
      * 主要的差异最终源于GC的要求，即我们尽快清空占用的插槽，以保持尽可能小的占地面积，
      * 即使在生成大量任务的程序中也是如此。
-     * 为了实现这一点，我们将CAS对流行与轮询（窃取）的仲裁从位于指数（“基础”和“顶部”）转移到插槽本身。
+     * 为了实现这一点，我们将CAS对弹出pop与轮询poll（窃取）的仲裁从位于指数
+     * （“基础base”和“顶部top”）转移到插槽本身。
      *
      * Adding tasks then takes the form of a classic array push(task)
      * in a circular buffer:
-     * 然后，在循环缓冲区中以经典数组推送（task）的形式添加任务：
+     * 然后，在循环缓冲区中以经典数组推送push（task）的形式添加任务：
      *    q.array[q.top++ % length] = task;
      *
      * The actual code needs to null-check and size-check the array,
@@ -237,18 +251,18 @@ public class ForkJoinPool extends AbstractExecutorService {
      * enforces memory ordering, supports resizing, and possibly
      * signals waiting workers to start scanning -- see below.
      *
-     * 实际的代码需要对数组进行null检查和大小检查，使用掩码而不是mod来索引二次方大小的数组，
-     * 强制执行内存排序，支持调整大小，并可能通知等待的工作人员开始扫描——请参阅下文。
+     * 实际的代码需要对数组进行null检查和大小检查，使用掩码（power-of-two-sized取模），
+     * 强制执行内存排序（memory ordering），支持调整大小，并可能通知等待的工作人员开始扫描。
      * 
      * The pop operation (always performed by owner) is of the form:
-     * 弹出操作（始终由所有者执行）的形式如下：
+     * 弹出pop操作（始终由所有者执行owner）的形式如下：
      *   if ((task = getAndSet(q.array, (q.top-1) % length, null)) != null)
      *        decrement top and return task;
      * If this fails, the queue is empty.
      * 如果失败，则队列为空。
      *
      * The poll operation by another stealer thread is, basically:
-     * 另一个窃取线程的轮询操作基本上是：
+     * 另一个窃取线程的轮询poll操作基本上是：
      *   if (CAS nonnull task at q.array[q.base % length] to null)
      *       increment base and return task;
      *
@@ -269,10 +283,10 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 这可能由于争用而失败，并且可能会重试。
      * 在尝试CAS之前，实现必须确保基本索引和任务的快照一致（通过循环或在其他地方尝试）。
      * 实际上没有这种形式的方法，因为在不同的上下文中，
-     * 由于不一致或争用而导致的失败以不同的方式处理，通常是先尝试其他队列。（
-     * 有关最简单的示例，请参阅方法pollScan。）对于需要在提取元素之前检查元素的情况，
+     * 由于不一致或争用而导致的失败以不同的方式处理，通常是先尝试其他队列。
+     * （有关最简单的示例，请参阅方法pollScan。）对于需要在提取元素之前检查元素的情况，
      * 还有其他变体，因此必须将这些变体与此代码的变体交织在一起。
-     * 此外，所有者使用更高效的版本（nextLocalTask）进行轮询。
+     * 此外，所有者（owners）使用更高效的版本（nextLocalTask）进行轮询。
      * 它避免了一些开销，因为在调用过程中队列无法增长。
      *
      * Memory ordering.  See "Correct and Efficient Work-Stealing for
@@ -283,7 +297,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * extracting tasks in array slots via volatile or atomic accesses
      * or explicit fences provides primary synchronization.
      *
-     * 内存排序。请参阅Le，Pop，Cohen和Nardelli的《弱内存模型的正确有效的工作窃取》，
+     * 内存排序（Memory ordering）。请参阅Le，Pop，Cohen和Nardelli的《弱内存模型的正确有效的工作窃取》，
      * 了解类似于此处使用的工作窃取算法中内存排序要求的分析。
      * 通过易失性volatile或原子访问atomic或显式围栏在阵列插槽中插入和提取任务提供了主同步。
      * 
@@ -299,16 +313,30 @@ public class ForkJoinPool extends AbstractExecutorService {
      *
      * 对deque元素的操作需要读取和写入索引和插槽。
      * 在可能的情况下，我们允许这些以任何顺序发生。
-     * 由于基索引和顶索引（以及在许多方法中访问的其他池或数组字段）
-     * 只能不精确地指导从何处提取，因此我们使用普通模式，
-     * 让元素getAndSet/CAS/setVolatile以外的访问以任何顺序出现。
+     * 由于基索引base和顶top索引（以及在许多方法中访问的其他池pool或数组array字段）
+     * 只能不精确地指示（定位）从何处提取，因此我们使用普通模式方式，
+     * 除去getAndSet/CAS/setVolatile以外的访问以任何序（内存访问）出现。
      * 但我们仍然必须在一些方法（主要是那些可以从外部访问的方法）
      * 前面加上一个acquireFence，以避免无限的过时。
      * 
+     * base直接写q.base = nextBase，在如下方法中使用
+     * scan、helpJoin、helpQuiescePool
+     * 
+     * 直接读b = q.base，在如下方法中使用：
+     * scan、awaitWork、canStop、helpJoin、helpComplete、pollScan
+     * helpQuiescePool、getSurplusQueuedTaskCount
+     * 在队列中的使用方法：
+     * queueSize、isEmpty、push、lockedPush、pop、tryUnpush、tryRemove
+     * tryPoll、nextLocalTask、peek、helpAsyncBlocker
+     *
+     * 原子操作：setBaseOpaque
+     * helpComplete、pollScan
+     * 队列方法：tryPoll、nextLocalTask、helpAsyncBlocker
+     * 
      * This is equivalent to acting as if
      * callers use an acquiring read of the reference to the pool or
-     * queue when invoking the method, even when they do not. We use
-     * explicit acquiring reads (getSlot) rather than plain array
+     * queue when invoking the method, even when they do not.
+     * We use explicit acquiring reads (getSlot) rather than plain array
      * access when acquire mode is required but not otherwise ensured
      * by context. To reduce stalls by other stealers, we encourage
      * timely writes to the base index by immediately following
@@ -317,9 +345,14 @@ public class ForkJoinPool extends AbstractExecutorService {
      * opportunity.
      *
      * 这相当于调用方在调用方法时使用对池或队列的引用的获取读取，即使调用方没有这样做。
-     * 当需要获取模式但上下文无法确保时，我们使用显式获取读取（getSlot）而不是纯数组访问。
-     * 为了减少其他窃取者的暂停，我们鼓励及时写入基本索引，
-     * 方法是在更新后立即写入必须更新的易失性字段，或者在没有这种机会的情况下写入不透明模式。
+     * 当需要获取acquire模式但上下文无法确保时，我们使用显式获取读取（getSlot）而不是纯数组访问。
+     * 为了减少其他窃取者的暂停，我们鼓励通过如下两种方法及时写入base基本索引，
+     * 方法一：在更新后立即写入必须更新的易失性volatile字段，
+     * 方法二：或者在没有这种机会的情况下写入不透明模式Opaque-mode。
+     *
+     * getSlot方法实现访问Task任务数组
+     * scan、helpJoin、helpComplete、pollScan、helpQuiescePool和
+     * 队列本身的tryPoll、helpAsyncBlocker通过getSlot来获取数组的值。
      * 
      * Because indices and slot contents cannot always be consistent,
      * the emptiness check base == top is only quiescently accurate
@@ -395,7 +428,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * queues.
      *
      * ThreadLocalRandom探测值用作选择现有队列的哈希代码，并且可以在与其他提交者发生争用时随机重新定位。
-     * 本质上，提交者的行为就像工人，只是他们被限制执行他们提交的本地任务（或者在已知的情况下，执行其子任务）。
+     * 本质上，提交者的行为就像工作者（线程），只是他们被限制执行他们提交的本地任务（或者在已知的情况下，执行其子任务）。
      * 在共享模式下插入任务需要锁定。我们只使用一个简单的spinlock（使用字段“source”），
      * 因为遇到繁忙队列的提交者会移动到不同的位置来使用或创建其他队列。它们仅在注册新队列时才会阻止。
      * 
@@ -417,7 +450,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * often read (not written) as status and consistency checks. We
      * pack as much information into them as we can.
      *
-     * 窃取工作的主要吞吐量优势源于分散控制——工人们大多以每秒超过10亿的速度从自己或彼此手中夺走任务。
+     * 窃取工作的主要吞吐量优势源于分散控制——工作者们（线程）大多以每秒超过10亿的速度从自己或彼此手中夺走任务。
      * 大多数非原子控制是通过在队列之间或队列内进行某种形式的扫描来执行的。
      * 池本身创建、激活（启用扫描和运行任务）、停用、阻塞和终止线程，所有这些都只需最少的中心信息。
      * 我们只能全局跟踪或维护少数属性，因此我们将它们打包到少量变量中，通常在不阻塞或锁定的情况下保持原子性。
@@ -455,7 +488,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * queues are at even indices. Grouping them together in this way
      * simplifies and speeds up task scanning.
      *
-     * 数组“queues”包含对WorkQueues的引用。它在registrationLock下更新（仅在工人创建和终止期间），
+     * 数组“queues”包含对WorkQueues的引用。它在registrationLock下更新（仅在工作者者创建和终止期间），
      * 但在其他方面是可并发读取的，并可直接访问（尽管总是以获取围栏或其他获取读取为开头）。
      * 为了简化基于索引的操作，数组大小总是2的幂，并且所有读卡器都必须允许空槽。工作队列的索引为奇数。
      * 使用SMASK屏蔽的工作ID与其索引匹配。共享（提交）队列的索引是偶数。
@@ -539,7 +572,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * workers. If exceptional, the exception is propagated, generally
      * to some external caller.
      *
-     * 创造工人。为了创建一个worker，我们预先增加计数（用作保留），并尝试通过其工厂构建ForkJoinWorkerThread。
+     * 创造工作者（线程）。为了创建一个worker，我们预先增加计数（用作保留），并尝试通过其工厂构建ForkJoinWorkerThread。
      * 启动时，新线程首先调用registerWorker，在那里它构造一个WorkQueue，
      * 并在queues数组中分配一个索引（如有必要，扩展数组）。
      * 在这些步骤中出现任何异常，或工厂返回null时，取消注册Worker会相应地调整计数和记录。
@@ -586,7 +619,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * worker to activate another when it pushes a task into an empty
      * queue, resulting in O(log(#threads)) steps to full activation.
      *
-     * 信号。信号（在signalWork中）使新的或重新激活的工人扫描任务。
+     * 信号。信号（在signalWork中）使新的或重新激活的工作者（线程）扫描任务。
      * 方法signalWork及其调用方试图接近为手头的任务激活正确数量的工作人员这一无法实现的目标，
      * 但必须在工作人员过多和过少的情况下犯错，以避免停滞。如果计算是纯树结构的，
      * 那么当每个工作者将任务推入空队列时，激活另一个就足够了，从而导致O(log(threads))步完全激活。
@@ -671,12 +704,12 @@ public class ForkJoinPool extends AbstractExecutorService {
      * signals are generated (see above) to eventually reactivate if
      * needed.
      *
-     * 停用。方法扫描在找不到任务时返回一个sentinel，导致停用（请参阅awaitWork）。
-     * ctl中的计数字段允许在去激活后准确发现静态（即，当所有工作程序都空闲时）。
+     * 停用。scan方法扫描在找不到任务时返回一个sentinel，导致停用（请参阅awaitWork）。
+     * ctl中的计数count字段允许在去激活后准确发现静态（即，当所有工作程序都空闲时）。
      * 然而，这也可能与新的（外部）提交竞争，因此还需要重新检查以确定静止。
      * 在明显触发静止后，awaitWork会重新扫描并发出信号（如果它可能错过了信号）。
      * 在其他情况下，丢失的信号可能会暂时降低并行性，因为去激活并不一定意味着没有更多的工作，
-     * 只是意味着没有其他工人没有完成的任务。
+     * 只是意味着没有其他工作者（线程）没有完成的任务。
      * 但如果需要的话，会产生更多的信号（见上文）最终重新激活。
      * 
      * Trimming workers. To release resources after periods of lack of
@@ -684,7 +717,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * time out and terminate if the pool has remained quiescent for
      * period given by field keepAlive.
      *
-     * 修剪工人。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的工作者将超时，
+     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的工作者将超时，
      * 如果池在字段keepAlive给定的时间段内保持静止，则终止。
      * 
      * Shutdown and Termination. A call to shutdownNow invokes
@@ -917,7 +950,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * overridden to do so (as is done for invoke{Any,All}).
      *
      * 该框架设计用于独立于运行任务的线程的中断状态来管理任务取消（ForkJoinTask.cancel）。
-     * （有关基本原理，请参阅公共ForkJoinTask文档。）中断仅在tryTerminate中发出，此时工人应该终止，
+     * （有关基本原理，请参阅公共ForkJoinTask文档。）中断仅在tryTerminate中发出，此时工作者（线程）应该终止，
      * 任务无论如何都应该取消。只有在必要时才清除中断，
      * 以确保对LockSupport.park的调用不会无限期循环（如果当前线程中断，则park会立即返回）。
      * 如果是这样的话，如果在任何任务的范围内状态都可见，那么在阻塞之后会恢复中断。
@@ -1992,7 +2025,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * Top-level runloop for workers, called by ForkJoinWorkerThread.run.
      * See above for explanation.
      *
-     * 工人的顶级运行循环，由ForkJoinWorkerThread.run调用。
+     * 工作者（线程）的顶级运行循环，由ForkJoinWorkerThread.run调用。
      *
      * @param w caller's WorkQueue (may be null on failed initialization)
      */
@@ -2162,7 +2195,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * that the caller doesn't need to re-adjust counts when later
      * unblocked.
      *
-     * 尝试递减计数（有时是隐式的），并可能安排一名补偿工人为阻塞做准备。可能由于干扰而失败，
+     * 尝试递减计数（有时是隐式的），并可能安排一名补偿工作者（线程）为阻塞做准备。可能由于干扰而失败，
      * 在这种情况下返回-1，因此调用者可以重试。零返回值表示调用方在以后取消阻止时不需要重新调整计数。
      *
      * @param c incoming ctl value 传入ctl值
