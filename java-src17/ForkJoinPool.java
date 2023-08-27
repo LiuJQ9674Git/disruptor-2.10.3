@@ -1226,24 +1226,64 @@ public class ForkJoinPool extends AbstractExecutorService {
     // Constants shared across ForkJoinPool and WorkQueue
 
     // Bounds
-    static final int SWIDTH       = 16;            // width of short 宽度
-    static final int SMASK        = 0xffff;        // short bits == max index
-    static final int MAX_CAP      = 0x7fff;        // max #workers - 1
+    static final int SWIDTH       = 16;          // width of short 宽度
+    static final int SMASK        = 0xffff;      // short bits == max index
+    static final int MAX_CAP      = 0x7fff;      // max #workers - 1
 
     // Masks and units for WorkQueue.phase and ctl sp subfield
-    static final int UNSIGNALLED  = 1 << 31;       // must be negative
-    static final int SS_SEQ       = 1 << 16;       // version count
+    static final int UNSIGNALLED  = 1 << 31;     // must be negative
+    static final int SS_SEQ       = 1 << 16;     // version count
 
     // Mode bits and sentinels, some also used in WorkQueue fields
-    static final int FIFO         = 1 << 16;       // fifo queue or access mode
-    static final int SRC          = 1 << 17;       // set for valid queue ids
-    static final int INNOCUOUS    = 1 << 18;       // set for Innocuous workers
-    static final int QUIET        = 1 << 19;       // quiescing phase or source
+    static final int FIFO         = 1 << 16;     // fifo queue or access mode
+    static final int SRC          = 1 << 17;     // set for valid queue ids
+    static final int INNOCUOUS    = 1 << 18;     // set for Innocuous workers
+    static final int QUIET        = 1 << 19;     // quiescing phase or source
+                                                 // 静止阶段或源
     static final int SHUTDOWN     = 1 << 24;
     static final int TERMINATED   = 1 << 25;
-    static final int STOP         = 1 << 31;       // must be negative
-    static final int UNCOMPENSATE = 1 << 16;       // tryCompensate return
+    static final int STOP         = 1 << 31;     // must be negative
+    static final int UNCOMPENSATE = 1 << 16;     // tryCompensate return
 
+    /**
+     * SMASK
+     *      signalWork、awaitWork、canStop、tryCompensate、helpJoin
+     *      getSurplusQueuedTaskCount、tryTerminate、
+     *      ForkJoinPool
+     *      getParallelism、getPoolSize、getActiveThreadCount
+     *      
+     * 
+     * SS_SEQ
+     *      awaitWork
+     *      int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;
+     *      c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
+     * 
+     * QUIET
+     *      读取方法：deregisterWorker、awaitWork、helpQuiescePool 无写方法
+     *      cfg、source
+     *      
+     * FIFO:mode、cfg
+     * 
+     * SRC
+     *      cfg config src id
+     *      
+     * INNOCUOUS
+     *      registerWorker、topLevelExec
+     *      cfg、mode：initializeInnocuousWorker 、eraseThreadLocals
+     *
+     * SHUTDOWN
+     *      isShutdown、tryTerminate、submissionQueue、awaitWork
+     *      mode
+     *
+     * TERMINATED / STOP
+     *      canStop、tryTerminate、
+     *      mode
+     *
+     * UNCOMPENSATE
+     *      tryCompensate
+     *      
+     */
+    
     /**
      * Initial capacity of work-stealing queue array.  Must be a power
      * of two, at least 2. See above.
@@ -1313,6 +1353,8 @@ public class ForkJoinPool extends AbstractExecutorService {
          * ForkJoinWorkerThread实例化
          */
         WorkQueue(ForkJoinWorkerThread owner, boolean isInnocuous) {
+            //INNOCUOUS: 无害的
+            //INNOCUOUS    = 1 << 18;       // set for Innocuous workers
             this.config = (isInnocuous) ? INNOCUOUS : 0;
             this.owner = owner;
         }
@@ -1334,6 +1376,7 @@ public class ForkJoinPool extends AbstractExecutorService {
          * 返回一个可导出的索引（由ForkJoinWorkerThread使用）。
          */
         final int getPoolIndex() {
+            //忽略奇数/偶数标记位
             return (config & 0xffff) >>> 1; // ignore odd/even tag bit
         }
 
@@ -1345,7 +1388,8 @@ public class ForkJoinPool extends AbstractExecutorService {
             //读取实例变量 top base一般实例变量, 确保外部调用程序进行新的读取，
             VarHandle.acquireFence(); // ensure fresh reads by external callers，
             int n = top - base;
-            return (n < 0) ? 0 : n;   // ignore transient negative ，忽略瞬态负数
+            // 忽略瞬态负数
+            return (n < 0) ? 0 : n;   // ignore transient negative ，
         }
 
         /**
@@ -1376,6 +1420,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                     growArray();
                 }
                 if (d == m || a[m & (s - 1)] == null){
+                    // 信号，如果为空或调整了大小
                     pool.signalWork(); // signal if was empty or resized
                 }
             }
@@ -1384,18 +1429,25 @@ public class ForkJoinPool extends AbstractExecutorService {
         /**
          * Pushes task to a shared queue with lock already held, and unlocks.
          * 将任务推送到已持有锁的共享队列，然后解锁。
+         *
+         * externalPush调用lockedPush
          * @return true if caller should signal work
+         *         如果调用者应该发出工作信号，则为true
          */
         final boolean lockedPush(ForkJoinTask<?> task) {
             ForkJoinTask<?>[] a = array;
             int s = top++, d = s - base, cap, m;
             if (a != null && (cap = a.length) > 0) {
-                a[(m = cap - 1) & s] = task;
-                if (d == m)
+                // 位置计算：数组长度 与 top取 & 计算 而不是数组长度取模%
+                a[(m = cap - 1) & s] = task;  //
+                if (d == m){ //宽度等于容量时扩容
                     growArray();
+                }
                 source = 0; // unlock
-                if (d == m || a[m & (s - 1)] == null)
+                // 宽度 top-base m为数组长度-1 或者新的数组没有元素
+                if (d == m || a[m & (s - 1)] == null){
                     return true;
+                }
             }
             return false;
         }
@@ -1423,12 +1475,13 @@ public class ForkJoinPool extends AbstractExecutorService {
                 }
                 int newMask = newCap - 1, oldMask = oldCap - 1;
                 for (int k = oldCap; k > 0; --k, --s) {
-                    ForkJoinTask<?> x;        // poll old, push to new，轮询旧的，推到新的
+                    ForkJoinTask<?> x;   // poll old, push to new，轮询旧的，推到新的
                     if ((x = getAndClearSlot(oldArray, s & oldMask)) == null)
-                        break;                // others already taken ，其他线程（工作者）已经服用
+                        break;  // others already taken ，其他线程（工作者）已经服用
                     newArray[s & newMask] = x;
                 }
-                VarHandle.releaseFence();     // fill before publish 发布前填写，写入实例变量
+                // fill before publish 发布前填写，写入实例变量
+                VarHandle.releaseFence(); 
                 array = newArray;
             }
         }
@@ -1550,8 +1603,9 @@ public class ForkJoinPool extends AbstractExecutorService {
             int s = top, cap; ForkJoinTask<?>[] a;
             if ((a = array) != null && (cap = a.length) > 0) {
                 for (int b, d;;) {
-                    if ((d = s - (b = base)) <= 0)
+                    if ((d = s - (b = base)) <= 0){
                         break;
+                    }
                     if (d == 1 || (cfg & FIFO) == 0) {
                         //工作者（线程）更新
                         if ((t = getAndClearSlot(a, --s & (cap - 1))) != null)
@@ -1754,7 +1808,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * to paranoically avoid potential initialization circularities
      * as well as to simplify generated code.
      *
-     * 公用（静态）池。除非是静态构造异常，否则公共使用非null，但内部使用null检查使用以超自然地避免潜在的初始化循环，并简化生成的代码。
+     * 公用（静态）池。除非是静态构造异常，否则公共使用非null，但内部使用null检查使用以超自然地避免潜
+     * 在的初始化循环，并简化生成的代码。
      */
     static final ForkJoinPool common;
 
@@ -1870,7 +1925,36 @@ public class ForkJoinPool extends AbstractExecutorService {
     private static final long TC_UNIT    = 0x0001L << TC_SHIFT;
     private static final long TC_MASK    = 0xffffL << TC_SHIFT;
     private static final long ADD_WORKER = 0x0001L << (TC_SHIFT + 15); // sign
-
+    
+    /**
+     * SP_MASK:
+     *  deregisterWorker、signalWork 、awaitWork、tryCompensate
+     *  ctl nc
+     *
+     * RC_SHIFT：
+     *  awaitWork、canStop、tryCompensate、getSurplusQueuedTaskCount
+     *  getActiveThreadCount
+     *
+     *TC_SHIFT：
+     *  tryCompensate、tryTerminate
+     *  getPoolSize
+     *  ctl
+     *
+     *ADD_WORKER
+     *  signalWork  
+     */
+    
+    //16  15   14   13   12     11    10   9     8   7    6    5     4    3     2   1
+    // UNSIGNALLED -2147483648
+    //  1 1111 1111 11111 11111 11111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
+    //SP_MASK 4294967295
+    //                                           1111 1111 1111 1111 1111 1111 1111 1111
+    //TC_UNIT:	4294967296
+    //                                         1 0000 0000 0000 0000 0000 0000 0000 0000
+    //TC_MASK:	281470681743360
+    //                       1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
+    //ADD_WORKER:	140737488355328
+    //                       1000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
     // Instance fields
 
     final long keepAlive;                // milliseconds before dropping if idle,如果空闲，则在丢弃前的毫秒
@@ -1969,39 +2053,66 @@ public class ForkJoinPool extends AbstractExecutorService {
      */
     final void registerWorker(WorkQueue w) {
         ReentrantLock lock = registrationLock;
+        //本地线程随机数
         ThreadLocalRandom.localInit();
+        //获取线程随机数
         int seed = ThreadLocalRandom.getProbe();
         if (w != null && lock != null) {
+            
+            // mode为parallelism, runstate, queue mode
+            // mode 由ForkJoinPool 构造方法希尔 写入
+            // 构造方法一：
+            //  this.mode = p | (asyncMode ? FIFO : 0);
+            // 构造方法二：
+            //  int p = Math.min(Math.max(parallelism, 0), MAX_CAP), size;
+            //  this.mode = p;
+            
+            //config
+            // index, mode, ORed with SRC after init SRC:1<<17 FIFO:1<<16
+            // WorkQueue 初始化 这种方式isInnocuous取true和falase均有使用
+            // this.config = (isInnocuous) ? INNOCUOUS : 0;
+            // submissionQueue方法写入ID
+            //  WorkQueue w = new WorkQueue(id | SRC);
             int modebits = (mode & FIFO) | w.config;
             w.array = new ForkJoinTask<?>[INITIAL_QUEUE_CAPACITY];
-            w.stackPred = seed;                         // stash for runWorker runWorker的存储
-            if ((modebits & INNOCUOUS) != 0)
+            //stackPred为本地线程随机数值
+            w.stackPred = seed;            // stash for runWorker runWorker的存储
+            // INNOCUOUS    = 1 << 18;       // set for Innocuous workers
+            if ((modebits & INNOCUOUS) != 0){
                 w.initializeInnocuousWorker();
-            int id = (seed << 1) | 1;                   // initial index guess 初始指数猜测
+            }
+            //id为本地随机数 id为奇数    
+            int id = (seed << 1) | 1;      // initial index guess 初始指数猜测
             lock.lock();
             try {
-                WorkQueue[] qs; int n;                  // find queue index 查找队列索引
+                WorkQueue[] qs; int n;    // find queue index 查找队列索引
                 if ((qs = queues) != null && (n = qs.length) > 0) {
                     int k = n, m = n - 1;
+                    //
                     for (; qs[id &= m] != null && k > 0; id -= 2, k -= 2);
-                    if (k == 0)
-                        id = n | 1;                     // resize below 在下面调整大小
-                    w.phase = w.config = id | modebits; // now publishable 现已发布
+                    if (k == 0){
+                        id = n | 1;         // resize below 在下面调整大小
+                    }
+                    w.phase = w.config = id | modebits; //now publishable 现已发布
 
                     if (id < n)
                         qs[id] = w;
-                    else {                              // expand array 展开数组
+                    else {                              //expand array 展开数组
                         int an = n << 1, am = an - 1;
                         WorkQueue[] as = new WorkQueue[an];
                         as[id & am] = w;
-                        for (int j = 1; j < n; j += 2)
+                        for (int j = 1; j < n; j += 2){
                             as[j] = qs[j];
+                        }
                         for (int j = 0; j < n; j += 2) {
                             WorkQueue q;
-                            if ((q = qs[j]) != null)    // shared queues may move 共享队列可能会移动
+                            // 共享队列可能会移动
+                            if ((q = qs[j]) != null) {   /shared queues may move 
                                 as[q.config & am] = q;
+                            }
                         }
-                        VarHandle.releaseFence();       // fill before publish 发布栅栏，queues为实例变量
+                        // 发布栅栏，queues为实例变量
+                        VarHandle.releaseFence();       // fill before publish 
                         queues = as;
                     }
                 }
@@ -2040,16 +2151,33 @@ public class ForkJoinPool extends AbstractExecutorService {
             stealCount += ns;                        // accumulate steals（volatile）累积
             lock.unlock();
             long c = ctl; //线程总数
-            if ((cfg & QUIET) == 0) // unless self-signalled, decrement counts 除非自发信号，否则递减计数
+            // QUIET        = 1 << 19;       // quiescing phase or source
+            // 静止阶段或源
+            // 除非自发信号，否则递减计数
+            if ((cfg & QUIET) == 0){ // unless self-signalled, decrement counts
+                // RC_SHIFT   = 48;
+                // RC_UNIT    = 0x0001L << RC_SHIFT;
+                // RC_MASK    = 0xffffL << RC_SHIFT;
+                
+                // TC_SHIFT   = 32;
+                // TC_UNIT    = 0x0001L << TC_SHIFT;
+                // TC_MASK    = 0xffffL << TC_SHIFT;
+                
+                // SP_MASK    = 0xffffffffL;
+                // 减小ctl值
                 do {} while (c != (c = compareAndExchangeCtl(
                                        c, ((RC_MASK & (c - RC_UNIT)) |
                                            (TC_MASK & (c - TC_UNIT)) |
                                            (SP_MASK & c)))));
-            else if ((int)c == 0)                    // was dropped on timeout 超时时被丢弃
-                cfg = 0;                             // suppress signal if last 抑制信号（如果是最后）
-            for (ForkJoinTask<?> t; (t = w.pop()) != null; )
+            }
+            else if ((int)c == 0){  // was dropped on timeout 超时时被丢弃
+                //抑制信号（如果是最后）
+                cfg = 0;                             // suppress signal if last 
+            }
+            for (ForkJoinTask<?> t; (t = w.pop()) != null; ){
                 ForkJoinTask.cancelIgnoringExceptions(t); // cancel tasks 取消任务
-        }
+            }
+        } //
 
         if (!tryTerminate(false, false) && w != null && (cfg & SRC) != 0)
             signalWork();                            // possibly replace worker 可能更换工作者（线程）
@@ -2238,13 +2366,20 @@ public class ForkJoinPool extends AbstractExecutorService {
     final boolean canStop() {
         outer: for (long oldSum = 0L;;) { // repeat until stable 重复直到稳定
             int md; WorkQueue[] qs;  long c;
-            if ((qs = queues) == null || ((md = mode) & STOP) != 0)
+            // STOP         = 1 << 31;
+            if ((qs = queues) == null || ((md = mode) & STOP) != 0){
                 return true;
-            if ((md & SMASK) + (int)((c = ctl) >> RC_SHIFT) > 0)
+            }
+            // SMASK        = 0xffff;
+            // RC_SHIFT   = 48;
+            // 任务数大于0
+            if ((md & SMASK) + (int)((c = ctl) >> RC_SHIFT) > 0){
                 break;
+            }
             long checkSum = c;
             for (int i = 1; i < qs.length; i += 2) { // scan submitters 扫描提交者
                 WorkQueue q; ForkJoinTask<?>[] a; int s = 0, cap;
+                //
                 if ((q = qs[i]) != null && (a = q.array) != null &&
                     (cap = a.length) > 0 &&
                     ((s = q.top) != q.base || a[(cap - 1) & s] != null ||
@@ -2252,10 +2387,12 @@ public class ForkJoinPool extends AbstractExecutorService {
                     break outer;
                 checkSum += (((long)i) << 32) ^ s;
             }
-            if (oldSum == (oldSum = checkSum) && queues == qs)
+            if (oldSum == (oldSum = checkSum) && queues == qs){
                 return true;
+            }
         }
-        return (mode & STOP) != 0; // recheck mode on false return 错误返回时的复查模式
+        // 重查模式，返回false
+        return (mode & STOP) != 0; // recheck mode on false return 
     }
 
     /**
@@ -2276,11 +2413,11 @@ public class ForkJoinPool extends AbstractExecutorService {
         Predicate<? super ForkJoinPool> sat;
         int md = mode, b = bounds;
         // counts are signed; centered at parallelism level == 0
-        int minActive = (short)(b & SMASK),
-            maxTotal  = b >>> SWIDTH,
-            active    = (int)(c >> RC_SHIFT),
-            total     = (short)(c >>> TC_SHIFT),
-            sp        = (int)c & ~UNSIGNALLED;
+        int minActive = (short)(b & SMASK),      // SMASK  = 0xffff;
+            maxTotal  = b >>> SWIDTH,            // SWIDTH = 16; 
+            active    = (int)(c >> RC_SHIFT),    // RC_SHIFT   = 48;
+            total     = (short)(c >>> TC_SHIFT), // TC_SHIFT   = 32;
+            sp        = (int)c & ~UNSIGNALLED;   // UNSIGNALLED  = 1 << 31; -2147483648
         if ((md & SMASK) == 0)
             return 0;                  // cannot compensate if parallelism zero
         else if (total >= 0) {
@@ -2656,29 +2793,51 @@ public class ForkJoinPool extends AbstractExecutorService {
      */
     final WorkQueue submissionQueue() {
         int r;
+        //
         if ((r = ThreadLocalRandom.getProbe()) == 0) {
-            ThreadLocalRandom.localInit();           // initialize caller's probe 初始化调用方的探测
+            // 初始化调用方的探测 
+            ThreadLocalRandom.localInit();           // initialize caller's probe
+            // 获取本地线程ID
             r = ThreadLocalRandom.getProbe();
         }
-        for (int id = r << 1;;) {                    // even indices only 仅偶数索引
-            int md = mode, n, i; WorkQueue q; ReentrantLock lock;
+        // 仅偶数索引
+        for (int id = r << 1;;) { // even indices only
+            // volatile int mode; // parallelism, runstate, queue mode
+            // 构造方法：
+            // this.mode = p | (asyncMode ? FIFO : 0);
+            // 构造方法:
+            // MAX_CAP      = 0x7fff;        // max #workers - 1
+            // int p = Math.min(Math.max(parallelism, 0), MAX_CAP), size;
+            // this.mode = p;
+            
+            // MAX_CAP      = 0x7fff;
+            // SHUTDOWN     = 1 << 24;
             WorkQueue[] qs = queues;
-            if ((md & SHUTDOWN) != 0 || qs == null || (n = qs.length) <= 0)
-                return null;
+            // SHUTDOWN     = 1 << 24;
+            // 
+            if ((md & SHUTDOWN) != 0 || qs == null || (n = qs.length) <= 0){
+                return null; 
+            }
             else if ((q = qs[i = (n - 1) & id]) == null) {
                 if ((lock = registrationLock) != null) {
+                    //SRC:
+                    //SRC          = 1 << 17;       // set for valid queue ids
                     WorkQueue w = new WorkQueue(id | SRC);
                     lock.lock();                    // install under lock
-                    if (qs[i] == null)
-                        qs[i] = w;                  // else lost race; discard 其他人输掉了竞争；丢弃
+                    if (qs[i] == null){
+                        // 其他人输掉了竞争；丢弃
+                        qs[i] = w;                  // else lost race; discard 
+                    }
                     lock.unlock();
                 }
-            }
-            else if (!q.tryLock())                  // move and restart 移动并重新启动
+            } //q不为空
+            else if (!q.tryLock()){ // move and restart 移动并重新启动
                 id = (r = ThreadLocalRandom.advanceProbe(r)) << 1;
-            else
+            }
+            else{
                 return q;
-        }
+            }
+        } //for over
     }
 
     /**
@@ -2687,14 +2846,18 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 将给定任务添加到外部提交队列，或者在关闭或终止时引发异常。
      *
      * pool的externalSubmit方法 和 Task的fork方法
+     * externalSubmit有下面方法调用：
+     * invoke、execute、submit
      * @param task the task. Caller must ensure non-null.
      */
     final void externalPush(ForkJoinTask<?> task) {
         WorkQueue q;
-        if ((q = submissionQueue()) == null)
+        if ((q = submissionQueue()) == null){
             throw new RejectedExecutionException(); // shutdown or disabled 关闭或禁用
-        else if (q.lockedPush(task))
+        }
+        else if (q.lockedPush(task)){//提交任务为true，则发布任务信号
             signalWork();
+        }
     }
 
     /**
@@ -2840,14 +3003,22 @@ public class ForkJoinPool extends AbstractExecutorService {
      */
     private boolean tryTerminate(boolean now, boolean enable) {
         int md; // try to set SHUTDOWN, then STOP, then help terminate
-        if (((md = mode) & SHUTDOWN) == 0) {
-            if (!enable)
+        // SHUTDOWN     = 1 << 24;
+        if (((md = mode) & SHUTDOWN) == 0) {//
+            if (!enable){
+                // 不能终止
                 return false;
+            }
             md = getAndBitwiseOrMode(SHUTDOWN);
         }
+        //  STOP         = 1 << 31;       // must be negative
+        // 已经终止
         if ((md & STOP) == 0) {
-            if (!now && !canStop())
+            if (!now && !canStop()){
                 return false;
+            }
+            //设置终止位
+            //按位原子更新访问  将获取变量的值并对其执行按位 OR 运算
             md = getAndBitwiseOrMode(STOP);
         }
         for (boolean rescan = true;;) { // repeat until no changes
@@ -2870,13 +3041,19 @@ public class ForkJoinPool extends AbstractExecutorService {
                 }
             }
             ReentrantLock lock; Condition cond; // signal when no workers
+            // TERMINATED   = 1 << 25;
+            // SMASK        = 0xffff;        // short bits == max index
+            // TC_SHIFT   = 32;
+            // mode;                   // parallelism, runstate, queue mode
             if (((md = mode) & TERMINATED) == 0 &&
-                (md & SMASK) + (short)(ctl >>> TC_SHIFT) <= 0 &&
+                (md & SMASK) + (short)(ctl >>> TC_SHIFT) <= 0 && //无任务
                 (getAndBitwiseOrMode(TERMINATED) & TERMINATED) == 0 &&
                 (lock = registrationLock) != null) {
                 lock.lock();
-                if ((cond = termination) != null)
+                //终止通知
+                if ((cond = termination) != null){
                     cond.signalAll();
+                }
                 lock.unlock();
             }
             if (changed)
