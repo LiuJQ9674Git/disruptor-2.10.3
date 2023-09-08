@@ -240,7 +240,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      *
      * 主要的差异最终源于GC的要求，即我们尽快清空占用的插槽，以保持尽可能小的占地面积，
      * 即使在生成大量任务的程序中也是如此。
-     * 为了实现这一点，我们将CAS对弹出pop与轮询poll（窃取）的仲裁从位于指数
+     * 为了实现这一点，我们将CAS对弹出pop与轮询poll（窃取）的仲裁从位于索引
      * （“基础base”和“顶部top”）转移到插槽本身。
      *
      * Adding tasks then takes the form of a classic array push(task)
@@ -2107,7 +2107,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                 w.initializeInnocuousWorker();
             }
             //id为本地随机数 id为奇数    
-            int id = (seed << 1) | 1;      // initial index guess 初始指数猜测
+            int id = (seed << 1) | 1;      // initial index guess 初始索引猜测
             lock.lock();
             try {
                 WorkQueue[] qs; int n;    // find queue index 查找队列索引
@@ -2619,7 +2619,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 
      * @param task root of CountedCompleter computation CountedCompleter计算的任务根
      * @param w caller's WorkQueue
-     * @param owned true if owned by a ForkJoinWorkerThread 如果由ForkJoinWorkerThread所有，则为owned true
+     * @param owned true if owned by a ForkJoinWorkerThread
+     *  如果由ForkJoinWorkerThread所有，则为owned true
      * @return task status on exit
      */
     final int helpComplete(ForkJoinTask<?> task, WorkQueue w, boolean owned) {
@@ -2629,7 +2630,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             boolean scan = true, locals = true;
             long c = 0L;
             outer: for (;;) {
-                if (locals) {                     // try locals before scanning 扫描前尝试本地
+                if (locals) {  // try locals before scanning 扫描前尝试本地
                     if ((s = w.helpComplete(task, owned, 0)) < 0)
                         break;
                     locals = false;
@@ -2640,7 +2641,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                     if (c == (c = ctl))
                         break;
                 }
-                else {                            // scan for subtasks 扫描子任务
+                else {        // scan for subtasks 扫描子任务
                     WorkQueue[] qs = queues;
                     int n = (qs == null) ? 0 : qs.length;
                     for (int i = n; i > 0; --i, ++r) {
@@ -2691,7 +2692,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      */
     private ForkJoinTask<?> pollScan(boolean submissionsOnly) {
         VarHandle.acquireFence();
-        int r = scanRover += 0x61c88647; // Weyl increment; raciness OK Weyl增量；比赛还好
+        //增量；比赛还好
+        int r = scanRover += 0x61c88647; // Weyl increment; raciness OK Weyl
         if (submissionsOnly)             // even indices only 仅偶数索引
             r &= ~1;
         int step = (submissionsOnly) ? 2 : 1;
@@ -2727,7 +2729,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * when tasks cannot be found, rescans until all others cannot
      * find tasks either.
      *
-     * 运行任务直到isQuiescent()。当找不到任务时不进行阻止，而是重新扫描，直到所有其他任务都找不到为止。
+     * 运行任务直到isQuiescent()。当找不到任务时不进行阻止，
+     * 而是重新扫描，直到所有其他任务都找不到为止。
      * 
      * @param nanos max wait time (Long.MAX_VALUE if effectively untimed)
      * @param interruptible true if return on interrupt
@@ -2875,7 +2878,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         //
         if ((r = ThreadLocalRandom.getProbe()) == 0) {
             // 初始化调用方的探测 
-            ThreadLocalRandom.localInit();           // initialize caller's probe
+            ThreadLocalRandom.localInit(); // initialize caller's probe
             // 获取本地线程ID
             r = ThreadLocalRandom.getProbe();
         }
