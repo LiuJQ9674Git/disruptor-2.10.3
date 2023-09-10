@@ -1138,6 +1138,8 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
     final void awaitPoolInvoke(ForkJoinPool pool, long nanos) {
         awaitDone(pool, false, true, true, nanos);
     }
+    
+    //ForkJoinTask的invoke方法调用
     final V joinForPoolInvoke(ForkJoinPool pool) {
         int s = awaitDone(pool, false, false, false, 0L);
         if ((s & ABNORMAL) != 0)
