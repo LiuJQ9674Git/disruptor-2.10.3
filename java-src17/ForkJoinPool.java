@@ -587,7 +587,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      *      long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
      *
      * runWorker
-     *     int r = w.stackPred, src = 0;       // use seed from registerWorker
+     *     int r = w.stackPred, src = 0;  // use seed from registerWorker
      *
      * tryCompensate                        取低32位      取高32位
      *      long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
@@ -604,11 +604,12 @@ public class ForkJoinPool extends AbstractExecutorService {
      *   do {
      *       w.stackPred = (int)prevCtl; 高32                低32
      *       c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
-     *   } while (prevCtl != (prevCtl = compareAndExchangeCtl(prevCtl, c)));
+     *   } while (prevCtl !=
+     *              (prevCtl = compareAndExchangeCtl(prevCtl, c)));
      *   
      *
-     * 2. int config;                // index, mode, ORed with SRC after init
-     *                               主池的三大阶段：注册、运行、退出
+     * 2. int config;        // index, mode, ORed with SRC after init
+     *                           主池的三大阶段：注册、运行、退出
      *
      *  读
      *   registerWorker
@@ -619,9 +620,10 @@ public class ForkJoinPool extends AbstractExecutorService {
      *      
      *   awaitWork              0xffffL
      *       else if (((int)c & SMASK) == (w.config & SMASK) &&
-     *                compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) | //高32
-     *                                     (prevCtl & SP_MASK)))) { //低32
-     *           w.config |= QUIET;           // sentinel for deregisterWorker
+     *        compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) | //高32
+     *                                 (prevCtl & SP_MASK)))) { //低32
+     
+     *           w.config |= QUIET;   // sentinel for deregisterWorker
      *
      *  helpJoin                                 0xffffL
      *      int wsrc = w.source, wid = w.config & SMASK, r = wid + 2;
@@ -635,7 +637,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      *       w.config |= SRC;
      *       
      *  awaitWork
-     *      w.config |= QUIET;           // sentinel for deregisterWorker
+     *      w.config |= QUIET;     // sentinel for deregisterWorker
      *
      *  WorkQueue(ForkJoinWorkerThread owner, boolean isInnocuous)
      *      this.config = (isInnocuous) ? INNOCUOUS : 0;
@@ -716,29 +718,30 @@ public class ForkJoinPool extends AbstractExecutorService {
      *
      *  锁方法
      *  tryLock
-     *      submissionQueue 外部生成共享队列，此时线程拥有者变量为null，config为探针哈希ID
+     *      submissionQueue 外部生成共享队列，
+     *                      此时线程拥有者变量为null，config为探针哈希ID
      *      WorkQueue
      *          externalTryUnpush
      *          tryRemove
      *          helpComplete
      *          
      *  状态信息位操作
-     * UC_MASK:	-4294967296 ~SP_MASK f*8+0*8
-     * 1111 1111 1111 1111 1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
+     * UC_MASK:	-4294967296 ~SP_MASK f*8+0*8 32
+     * 1111111111111111111111111111111100000000000000000000000000000000
      * 
      * SP_MASK:	4294967295 0xffffffffL（f*8)
-     *                                         1111 1111 1111 1111 1111 1111 1111 1111
+     *                                  11111111111111111111111111111111
      *
      * SS_SEQ:	65536	SS_SEQ      = 1 << 16;       // version count
-     *                                                            1 0000 0000 0000 0000
+     *                                             1 0000 0000 0000 0000
      *
      * SMASK:	65535	SMASK = 0xffff;      // short bits == max index
-     *                                                              1111 1111 1111 1111
+     *                                                1111 1111 1111 1111
      *
      * UNSIGNALLED:	-2147483648 1 << 31
-     *  1111 1111 1111 1111 1111 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
+     *  1111111111111111111111111111111110000000000000000000000000000000
      * ~UNSIGNALLED:	2147483647
-     *                                           111 1111 1111 1111 1111 1111 1111 1111                                
+     *                                   1111111111111111111111111111111                                
      *      stackPred
      *          
      *          (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
@@ -753,30 +756,30 @@ public class ForkJoinPool extends AbstractExecutorService {
      *          q.source & SMASK
      *          
      *  状态信息写入顺序 w:写 r：读 
-     *                       | stackPred |  config   |  phase   |   source
-     *                       ---------------------------------------------     
-     *      new ForkJoinPool |           |     w      |          |
-     *      ---------------------------------------------------------------
-     *      new WorkQueue    |           |     w     |     w     |
-     *      ---------------------------------------------------------------
-     *      submissionQueue  |           |           |           |
-     *      ---------------------------------------------------------------
-     *      registerWorker   |      w    |     w/r   |           |
-     *      ---------------------------------------------------------------
-     *      runWorker        |      r    |     w     |           |
-     *      --------------------------------------------------------------
-     *      signalWork       |      r    |           |     w     |
-     *      ---------------------------------------------------------------
-     *      scan             |           |           |           |   w
-     *      ---------------------------------------------------------------
-     *      awaitWork        |      w    |    w/r    |      r    |   r
-     *      ---------------------------------------------------------------
-     *      helpJoin         |           |     r     |           |   w/r
-     *      ---------------------------------------------------------------
-     *      tryCompensate    |      r    |           |      w    |
-     *      ---------------------------------------------------------------
-     *      helpComplete     |           |     r     |           |
-     *      ---------------------------------------------------------------
+     *                       | stackPred | config | phase | source
+     *                       ------------------------------------------  
+     *      new ForkJoinPool |           |    w  |        |
+     *      -----------------------------------------------------------
+     *      new WorkQueue    |           |    w  |     w  |
+     *      -----------------------------------------------------------
+     *      submissionQueue  |           |       |        |
+     *      -----------------------------------------------------------
+     *      registerWorker   |      w    |   w/r |       |
+     *      -----------------------------------------------------------
+     *      runWorker        |      r    |   w    |       |
+     *      -----------------------------------------------------------
+     *      signalWork       |      r    |        |   w   |
+     *      -----------------------------------------------------------
+     *      scan             |           |        |       |   w
+     *      -----------------------------------------------------------
+     *      awaitWork        |      w    |    w/r |   r   |   r
+     *      -----------------------------------------------------------
+     *      helpJoin         |           |     r  |           |   w/r
+     *      -----------------------------------------------------------
+     *      tryCompensate    |      r    |        |      w    |
+     *      -----------------------------------------------------------
+     *      helpComplete     |           |     r  |           |
+     *      ----------------------------------------------------------
      *
      *      invoke -> submissionQueue-> new WorkQueue -> signalWork
      *      fork ->              push                  -> signalWork
@@ -2389,7 +2392,8 @@ public class ForkJoinPool extends AbstractExecutorService {
     private static final int  TC_SHIFT   = 32;
     private static final long TC_UNIT    = 0x0001L << TC_SHIFT;
     private static final long TC_MASK    = 0xffffL << TC_SHIFT;
-    private static final long ADD_WORKER = 0x0001L << (TC_SHIFT + 15); // sign
+    // sign
+    private static final long ADD_WORKER = 0x0001L << (TC_SHIFT + 15); 
     
     /**
      * SP_MASK:
@@ -2831,6 +2835,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 如果运行的工作线程太少，则尝试创建或释放工作线程。
      */
     final void signalWork() {
+        // ctl:	-4222399528566784
+        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
         for (long c = ctl; c < 0L;) {
             int sp, i; WorkQueue[] qs; WorkQueue v;
             // 没有闲着的工作者（线程）
@@ -3824,7 +3830,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         
         //EXP:
         // ctl:	-4222399528566784
-        //ctl->:1111111111110000111111111100000000000000000000000000000000000000
+        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
         // int p=16;
         // int corePoolSize=64;
         // ctl初始化为负值
