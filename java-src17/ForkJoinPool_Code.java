@@ -1273,15 +1273,15 @@ public class ForkJoinPool extends AbstractExecutorService {
         // ~UNSIGNALLED 7+f*7 31位
         
         // SS_SEQ第17位为1，后续是连续的0 1+0*4
-        //                                 |   phase段  |16
+        //                                              |   phase段     |
         //                                              10000000000000000
         //                                 1111111111111111111111111111111
-        //                                 |     phase段 10000000000000000
+        //                                           
         // w.phase + SS_SEQ 使得位标记到17~31位置段，即INT的高16段
         // & ~UNSIGNALLED 执行之后，低16段清零
         int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;
         //1111111111111111111111111111111110000000000000000000000000000000
-        //                                 |     phase段 10000000000000000
+        //                                               10000000000000000
         // 下面取或|操作之后，w.phase的高32位1，即是负值
         w.phase = phase | UNSIGNALLED;       // advance phase 推动阶段
         long prevCtl = ctl, c;               // enqueue 入队
@@ -1305,8 +1305,17 @@ public class ForkJoinPool extends AbstractExecutorService {
         long deadline = 0L;
         // nonzero if possibly quiescent
         // RC_SHIFT   = 48;
-        // ac为
-        //1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
+        //size:	32	H>:	20	S-B->:6 p=16
+        //                                                               10 0000
+        //seed:	27	H>:	1b	S-B->:5
+        //                                                                1 1011
+        //phase:	-4222399528566784	H>:	10002	S-B->:17
+        //                                                 1 0000 0000 0000 0010
+        //      
+        //phase:	-4222399528566784	H>:	8001001b	S-B->:32
+        //                               1000 0000 0000 0001 0000 0000 0001 1011
+        //ac:	    -4222399528566784	H>:	fffffff0	S-B->:32
+        //                               1111 1111 1111 1111 1111 1111 1111 0000  
         int ac = (int)(c >> RC_SHIFT), md;
         if ((md = mode) < 0)  {  // pool is terminating 池正在终止
             return -1;
@@ -1622,7 +1631,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         Predicate<? super ForkJoinPool> sat;
         int md = mode, b = bounds;
         // counts are signed; centered at parallelism level == 0
-        //SMASK:	65535	1111111111111111
+        //SMASK:	65535	                             1111111111111111
         //UNSIGNALLED:	-2147483648	
         //1111111111111111111111111111111110000000000000000000000000000000
         //~UNSIGNALLED:	2147483647	
@@ -1665,6 +1674,10 @@ public class ForkJoinPool extends AbstractExecutorService {
                 //1111111111111111000000000000000000000000000000000000000000000000
                 //~RC_MASK:	281474976710655
                 //                111111111111111111111111111111111111111111111111
+                
+                //nc:	-16	H>:	ffefffc000000000	S-B->:64
+               //1111 1111 1110 1111 1111 1111 1100 0000
+               //0000 0000 0000 0000 0000 0000 0000 0000
                 long nc = ((RC_MASK & (c - RC_UNIT)) | (~RC_MASK & c));
                 return compareAndSetCtl(c, nc) ? UNCOMPENSATE : -1;
             }
