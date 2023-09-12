@@ -1104,7 +1104,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             int modebits = (mode & FIFO) | w.config; 
             //任务队列数组
             w.array = new ForkJoinTask<?>[INITIAL_QUEUE_CAPACITY];
-            //stackPred为本地线程哈希值
+            //stackPred线程哈希值，线程同队列数组的对应关系
             //stackPred;             // pool stack (ctl) predecessor link
             w.stackPred = seed;            // stash for runWorker runWorker的存储
             // INNOCUOUS    = 1 << 18;       // set for Innocuous workers
@@ -1117,7 +1117,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             try {
                 WorkQueue[] qs; int n;    // find queue index 查找队列索引
                 if ((qs = queues) != null && (n = qs.length) > 0) {
-                    int k = n, m = n - 1;
+                    int k = n, m = n - 1; //k为主队列长度
                     //
                     for (; qs[id &= m] != null && k > 0; id -= 2, k -= 2);
                     if (k == 0){
@@ -1128,22 +1128,25 @@ public class ForkJoinPool extends AbstractExecutorService {
                     // volatile phase;        // versioned, negative if inactive
                     
                     // submissionQueue中phase为-1，config为id（线程哈希）
-                    // 此外，内部的ID为奇数，外部的ID为偶数
+                    // 此外，内部的ID为奇数，外部的ID为偶数，
                     w.phase = w.config = id | modebits; //now publishable
-
-                    if (id < n)
-                        qs[id] = w;
+                    //
+                    if (id < n){
+                        //主任务在设置seed、phase、config写入id的位置
+                        qs[id] = w; //id为主队列从最大位置开始，最后一个没有任务的位置
+                    }
                     else {                //expand array 展开数组
                         int an = n << 1, am = an - 1;
                         WorkQueue[] as = new WorkQueue[an];
+                        //主任务在设置seed、phase、config写入id的位置
                         as[id & am] = w;
-                        for (int j = 1; j < n; j += 2){
+                        for (int j = 1; j < n; j += 2){ //奇数为主工作任务，owner不为空
                             as[j] = qs[j];
                         }
                         for (int j = 0; j < n; j += 2) {
                             WorkQueue q;
                             // 共享队列可能会移动
-                            if ((q = qs[j]) != null) {   /shared queues may move 
+                            if ((q = qs[j]) != null) { //shared queues may move 
                                 as[q.config & am] = q;
                             }
                         }
@@ -1163,25 +1166,29 @@ public class ForkJoinPool extends AbstractExecutorService {
      * See above for explanation.
      *
      * 工作者（线程）的顶级运行循环，由ForkJoinWorkerThread.run调用。
-     *
+     * 运行的首个任务是由工作线程执行的。
      * @param w caller's WorkQueue (may be null on failed initialization)
      */
     final void runWorker(WorkQueue w) {
         if (mode >= 0 && w != null) {  // skip on failed init 初始化失败时跳过
-            //SRC:	131072	Bit->:100000000000000000
-            //SRC          = 1 << 17;
-            //INNOCUOUS    = 1 << 18;
-            //QUIET        = 1 << 19;
-            //STOP         = 1 << 31;       // must be negative
-            //UNCOMPENSATE = 1 << 16;       // tryCompensate return
+            // SRC:	131072	             10 0000 0000 0000 0000
+            // SRC          = 1 << 17;
+            // INNOCUOUS    = 1 << 18;
+            // QUIET        = 1 << 19;
+            // STOP         = 1 << 31;       // must be negative
+            // UNCOMPENSATE = 1 << 16;       // tryCompensate return
             
+            // 主任务启动之后，执行创建的ForkJoinWorkThread生成的WorkQueue
+            // 在队列中 config 在写入SRC
             w.config |= SRC;                    // mark as valid source 标记为有效源
-            //使用registerWorker中的种子
+            //使用registerWorker中的种子，线程哈希值
             int r = w.stackPred, src = 0;       // use seed from registerWorker 
             do {
                 r ^= r << 13; r ^= r >>> 17; r ^= r << 5; // xorshift
-            } while ((src = scan(w, src, r)) >= 0 ||
-                     (src = awaitWork(w)) == 0);
+                // 线程探针哈希值，做随机变化之后，在主任务中查找并执行任务队列中的认证
+                // r为主任务队列位置
+            } while ((src = scan(w, src, r)) >= 0 || //
+                     (src = awaitWork(w)) == 0); //当scan值小于0
         }
     }
 
@@ -1206,20 +1213,29 @@ public class ForkJoinPool extends AbstractExecutorService {
         int n = (w == null || qs == null) ? 0 : qs.length;
         for (int step = (r >>> 16) | 1, i = n; i > 0; --i, r += step) {
             int j, cap, b; WorkQueue q; ForkJoinTask<?>[] a;
+            //
             if ((q = qs[j = r & (n - 1)]) != null && // poll at qs[j].array[k]
-                (a = q.array) != null && (cap = a.length) > 0) {
+                (a = q.array) != null && (cap = a.length) > 0) { //a 为为主任务队列r位置任务
+                // k为子任务（WorkQueue.array）中的位置，底部base任务
                 int k = (cap - 1) & (b = q.base), nextBase = b + 1;
-                int nextIndex = (cap - 1) & nextBase, src = j | SRC; //base索引
+                // nextIndex下一个底部开始子任务（WorkQueue.array）中的位置
+                // j位置为线程探针哈希值，src为对seed做SRC标记
+                int nextIndex = (cap - 1) & nextBase, src = j | SRC;
+                // 底部子任务
                 ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
                 if (q.base != b)                // inconsistent
                     return prevSrc;
                 else if (t != null && WorkQueue.casSlotToNull(a, k, t)) {
+                    // 取得任务t不为空，是一个检查
                     q.base = nextBase;
+                    // 下一个子任务ForkJoinTask
                     ForkJoinTask<?> next = a[nextIndex];
+                    // 主工作任务 j的任务不是参数传入的prevSrc，存在子队列中存在下一个任务
                     if ((w.source = src) != prevSrc && next != null){
                         //传播/产生任务 调用createWorker生产线程
                         signalWork();           // propagate 
                     }
+                    // 队列执行任务t,执行子任务方法1
                     w.topLevelExec(t, q);
                     return src;
                 }
@@ -1244,24 +1260,40 @@ public class ForkJoinPool extends AbstractExecutorService {
             return -1;                       // already terminated 已终止
         }
 
-        //SS_SEQ:	65536	1<<16
-        //                        10000000000000000
+        //SS_SEQ:	65536	1<<16                       -16
+        //                                              10000000000000000
 
-        //UNSIGNALLED:	-2147483648	
+        //UNSIGNALLED:	-2147483648 f*8 64位
+        //                                 31
+        //                                 -
         //1111111111111111111111111111111110000000000000000000000000000000
         
-        //~UNSIGNALLED:	2147483647	
+        //~UNSIGNALLED:	2147483647	       31
         //                                 1111111111111111111111111111111
+        // ~UNSIGNALLED 7+f*7 31位
+        
+        // SS_SEQ第17位为1，后续是连续的0 1+0*4
+        //                                 |   phase段  |16
+        //                                              10000000000000000
+        //                                 1111111111111111111111111111111
+        //                                 |     phase段 10000000000000000
+        // w.phase + SS_SEQ 使得位标记到17~31位置段，即INT的高16段
+        // & ~UNSIGNALLED 执行之后，低16段清零
         int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;
+        //1111111111111111111111111111111110000000000000000000000000000000
+        //                                 |     phase段 10000000000000000
+        // 下面取或|操作之后，w.phase的高32位1，即是负值
         w.phase = phase | UNSIGNALLED;       // advance phase 推动阶段
         long prevCtl = ctl, c;               // enqueue 入队
         do {
+            // ctl 默认是主队列容量RC/TC的负值
             w.stackPred = (int)prevCtl;
             //RC_UNIT:
-            //UC_MASK:
+            //UC_MASK:                       -32
             //1111111111111111111111111111111100000000000000000000000000000000
-            //SP_MASK
+            //SP_MASK                         32
             //                                11111111111111111111111111111111
+            // 高32位用于计数 phase 用后32位
             c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK); //c值
             //c值更新
         } while (prevCtl != (prevCtl = compareAndExchangeCtl(prevCtl, c))); 
@@ -1273,6 +1305,8 @@ public class ForkJoinPool extends AbstractExecutorService {
         long deadline = 0L;
         // nonzero if possibly quiescent
         // RC_SHIFT   = 48;
+        // ac为
+        //1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
         int ac = (int)(c >> RC_SHIFT), md;
         if ((md = mode) < 0)  {  // pool is terminating 池正在终止
             return -1;
