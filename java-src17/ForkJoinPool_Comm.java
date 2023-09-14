@@ -17,7 +17,7 @@
      *
      * 这个类及其嵌套类为一组工作线程提供了主要功能和控制：
      * 来自非FJ线程的提交进入提交队列。
-     * 工作者（线程）接受这些任务会将它们拆分为可能被其他工作者（线程）窃取的子任务。
+     * 工作线程（线程）接受这些任务会将它们拆分为可能被其他工作线程（线程）窃取的子任务。
      * 基于随机扫描的工作窃取通常比生产者将任务分配给空闲线程的“工作处理”能带来更好的吞吐量，
      * 部分原因是在发出信号的线程唤醒（可能需要很长时间）之前完成了其他任务的线程可以接受任务。
      * 偏好规则优先处理自己队列中的任务（LIFO或FIFO，取决于模式），
@@ -441,37 +441,41 @@
      * can globally track or maintain, so we pack them into a small
      * number of variables, often maintaining atomicity without
      * blocking or locking.
-     *
+     * 
+     * 窃取工作的主要吞吐量优势源于分散控制——工作线程们线程）大多以每秒超过10亿的速度
+     * 从自己或彼此手中夺走任务。
+     * 大多数非原子控制是通过在队列之间或队列内进行某种形式的扫描来执行的。
+     * 池本身创建、激活（启用扫描和运行任务）、停用、阻塞和终止线程，
+     * 所有这些都只需最少的核心信息。
+     * 我们只能全局跟踪或维护少数属性，因此我们将它们打包到少量变量中，
+     * 通常在不阻塞或锁定的情况下保持原子性。
+     * 
      * Nearly all essentially atomic control
      * state is held in a few volatile variables that are by far most
      * often read (not written) as status and consistency checks.
      * 
-     * We pack as much information into them as we can.
-     *
-     * 窃取工作的主要吞吐量优势源于分散控制——工作者们（线程）大多以每秒超过10亿的速度
-     * 从自己或彼此手中夺走任务。
-     * 大多数非原子控制是通过在队列之间或队列内进行某种形式的扫描来执行的。
-     * 池本身创建、激活（启用扫描和运行任务）、停用、阻塞和终止线程，
-     * 所有这些都只需最少的中心信息。
-     * 我们只能全局跟踪或维护少数属性，因此我们将它们打包到少量变量中，
-     * 通常在不阻塞或锁定的情况下保持原子性。
-     * 
      * 几乎所有本质上的原子控制状态都保存在少数易失性volatile变量中，
      * 这些变量通常作为状态和一致性检查进行读取（而不是写入）。
+     * 
+     * We pack as much information into them as we can.
+     * 
      * 我们将尽可能多的信息打包到它们中。
      * 
      * Field "ctl" contains 64 bits holding information needed to
      * atomically decide to add, enqueue (on an event queue), and
-     * dequeue and release workers.  To enable this packing, we
-     * restrict maximum parallelism to (1<<15)-1 (which is far in
-     * excess of normal operating range) to allow ids, counts, and
+     * dequeue and release workers.
+     * 
+     * 字段“ctl”包含64位，其中包含原子决定添加、入队（在事件队列上）、出队和释放
+     * 工作线程所需的信息。
+     * 
+     * To enable this packing, we restrict maximum parallelism
+     * to (1<<15)-1 (which is far in excess of normal operating range)
+     * to allow ids, counts, and
      * their negations (used for thresholding) to fit into 16bit
      * subfields.
      *
-     * 字段“ctl”包含64位，其中包含原子决定添加、入队（在事件队列上）、出队和释放
-     * 工作者所需的信息。
      * 为了实现这种打包，我们将最大并行度限制为（1<<15）-1（远远超过正常操作范围），
-     * 以允许id、计数及其否定（用于阈值处理）适合16位子字段。
+     * 以允许id、计数及其负值（用于阈值处理）填充到16位子字段。
      *
      * Field "mode" holds configuration parameters as well as lifetime
      * status, atomically and monotonically setting SHUTDOWN, STOP,
@@ -479,7 +483,7 @@
      * atomics (getAndBitwiseOr).
      *
      * 字段“mode”保存配置参数以及生存期状态，原子地和单调地设置
-     * SHUTDOWN、STOP和TERMINATED位。
+     * SHUTDOWN、STOP和TERMINATED 位。
      * 它仅通过逐位原子（getAndBitwiseOr）进行更新。
      * 
      * Array "queues" holds references to WorkQueues.  It is updated
@@ -488,23 +492,33 @@
      * accessed directly (although always prefaced by acquireFences or
      * other acquiring reads). To simplify index-based operations, the
      * array size is always a power of two, and all readers must
-     * tolerate null slots.  Worker queues are at odd indices. Worker
-     * ids masked with SMASK match their index. Shared (submission)
-     * queues are at even indices. Grouping them together in this way
+     * tolerate null slots.
+     * 
+     * 数组“queues”包含对WorkQueues的引用。它在registrationLock下更新
+     * （仅在工作线程创建和终止期间），
+     * 但在其他方面是可并发读取的，并可直接访问（尽管总是以获取围栏或其他获取读取为开头）。
+     * 为了简化基于索引的操作，数组大小总是2的幂，并且所有读都必须允许空槽。
+     * 
+     * Worker queues are at odd indices. Worker
+     * ids masked with SMASK match their index.
+     * 
+     * Shared (submission) queues are at even indices.
+     *
+     * Grouping them together in this way
      * simplifies and speeds up task scanning.
      *
-     * 数组“queues”包含对WorkQueues的引用。它在registrationLock下更新
-     * （仅在工作者者创建和终止期间），
-     * 但在其他方面是可并发读取的，并可直接访问（尽管总是以获取围栏或其他获取读取为开头）。
-     * 为了简化基于索引的操作，数组大小总是2的幂，并且所有读卡器都必须允许空槽。
-     * 工作队列的索引为奇数。
-     * 使用SMASK屏蔽的工作ID与其索引匹配。共享（提交）队列的索引是偶数。
+     * 工作线程队列的索引为奇数。使用SMASK做掩码的工作线程ID与其索引匹配。
+     * 共享（提交submission）队列的索引是偶数。
+     * 
      * 以这种方式将它们分组在一起可以简化并加快任务扫描。
      *
      * All worker thread creation is on-demand, triggered by task
      * submissions, replacement of terminated workers, and/or
      * compensation for blocked workers.
-     *
+     * 
+     * 所有工作线程的创建都是按需的，由任务提交、替换终止的工作线程和/或补偿
+     * 被阻塞的工作线程触发。
+     * 
      * However, all other support
      * code is set up to work with other policies.  To ensure that we
      * do not hold on to worker or task references that would prevent
@@ -514,10 +528,9 @@
      * a weak reference mechanism. Thus for example the stack top
      * subfield of ctl stores indices, not references.
      *
-     * 所有工作线程的创建都是按需的，由任务提交、替换终止的工作线程和/或补偿被阻止的工作线程触发。
      * 
      * 但是，所有其他支持代码都设置为与其他策略配合使用。
-     * 为了确保我们不会保留会阻止GC的工作者或任务引用，
+     * 为了确保我们不会保留会阻止GC的工作线程或任务引用，
      * 所有对workQueues的访问都是通过队列数组中的索引进行的（这是这里一些混乱代码构造的来源之一）。
      * 从本质上讲，队列数组是一种弱引用机制。因此，例如ctl的栈顶子字段存储索引，而不是引用。
      * 
@@ -534,9 +547,10 @@
      * allocation. On the other hand, throughput degrades when too
      * many threads poll for too few tasks.
      *
-     * 正在排队等候空闲工作者。与HPC窃取工作的框架不同，
-     * 我们不能让工作证在无法立即找到任务的情况下无限期地扫描任务，
-     * 并且除非出现可用任务，否则我们不能启动/恢复工作工作者。
+     * 正在排队等候空闲工作线程。与HPC窃取工作的框架不同，
+     * 我们不能让工作线程在无法立即找到任务的情况下无限期地扫描任务，
+     * 并且除非出现可用任务，否则我们不能启动/恢复工作线程。
+     * 
      * 另一方面，当提交或生成新任务时，我们必须迅速促使他们采取行动。
      * 这些延迟主要是JVM park/unpark（和底层操作系统）性能的函数，
      * 这可能是缓慢的且可变的。
@@ -557,11 +571,12 @@
      * being prone to contention and inability to release a worker
      * unless it is topmost on stack.
      *
-     * “ctl”字段原子性地维护总的和“释放的”工作人员计数，加上可用工作队列的头
+     * “ctl”字段原子性地维护总的和“释放”工作线程计数，加上可用工作队列的头
      * （实际上是堆栈，由ctl的低32位子字段表示）。
-     * 被释放的工作者是那些已知正在扫描和/或运行任务的工作者。
+     * 被释放的工作线程是那些已知正在扫描和/或运行任务的工作线程。
      * 未释放（“可用”）的工作线程记录在ctl堆栈中。
-     * 这些工作者可以通过在ctl中排队来发出信号（请参阅awaitWork方法）。
+     * 
+     * 这些工作线程可以通过在ctl中排队来发出信号（请参阅awaitWork方法）。
      * “队列”是Treiber堆栈的一种形式。
      * 这非常适合以最近使用的顺序激活线程，并提高了性能和位置，
      * 超过了易发生争用和无法释放工作线程的缺点，除非它位于堆栈的最顶端。
@@ -572,8 +587,8 @@
      * (also serving as version stamps) provide protection against
      * Treiber stack ABA effects.
      *
-     * 顶部堆栈状态保存工作程序的“阶段”字段的值：(WorkQueue的volatile字段)
-     * 它的索引和状态，加上一个版本计数器，除了计数子字段（也用作版本戳）之外，
+     * 顶部堆栈状态保存工作线程的“阶段phase”字段的值：(WorkQueue的volatile字段)
+     * 队列的索引和状态，加上一个版本计数器，除了计数子字段（也用作版本戳）之外，
      * 该计数器还提供针对Treiber堆栈ABA效应的保护。
      * 
      * Creating workers. To create a worker, we pre-increment counts
@@ -588,12 +603,12 @@
      * workers. If exceptional, the exception is propagated, generally
      * to some external caller.
      *
-     * 创造工作者（线程）。为了创建一个worker，我们预先增加计数（用作保留），
+     * 创造工作（线程）。为了创建一个worker，我们预先增加计数（用作保留），
      * 并尝试通过其工厂构建ForkJoinWorkerThread。
      * 启动时，新线程首先调用registerWorker，在那里它构造一个WorkQueue，
      * 并在queues数组中分配一个索引（如有必要，扩展数组）。
      * 在这些步骤中出现任何异常，或工厂返回null时，取消注册Worker会相应地调整计数和记录。
-     * 如果返回null，则池将继续运行，工作人员数量将少于目标数量。
+     * 如果返回null，则池将继续运行，工作线程数量将少于目标数量。
      * 如果出现异常，则通常会将异常传播到某个外部调用方。
      * 
      * WorkQueue field "phase" is used by both workers and the pool to
@@ -605,11 +620,12 @@
      * its phase must hold its pool index. So we place the index there
      * upon initialization and never modify these bits.
      *
-     * WorkQueue的volatile字段“phase”由工作者线程和池使用，以管理和跟踪工作线程是否未被忽略
+     * WorkQueue的volatile字段“phase”由工作线程和池使用，
+     * 以管理和跟踪工作线程是否是负值UNSIGNALLED
      * （可能被阻止等待信号）。
-     * 当工作者入队时，其相位字段设置为负值。
-     * 请注意，阶段字段更新CAS发布的滞后队列；看到负相位并不能保证工作者是可用的。
-     * 当排队时，其相位的较低16位必须保持其池索引。
+     * 当工作线程入队时，其阶段phase字段设置为负值。
+     * 请注意，阶段字段更新CAS发布的滞后队列；看到负阶段phase并不能保证工作线程是可用的。
+     * 当入队时，其工作线程的低16位必须保持其池索引。
      * 因此，我们在初始化时将索引放在那里，并且从不修改这些位。
      *
      * The ctl field also serves as the basis for memory
@@ -623,44 +639,51 @@
      * access (which is usually needed anyway).
      *
      * ctl字段还充当了围绕激活的内存同步的基础。
-     * 这使用了一个更高效的类似Dekker的规则版本，
-     * 即任务生产者和消费者通过写入/CASing ctl（即使达到其当前值）来相互同步。
-     * 然而，与在不需要任何操作的常见情况下将ctl CASing为其当前值不同，
-     * 我们通过确保signalWork调用以完全的易失性内存访问（这通常是需要的）为前提来减少写争用。
+     * 这使用了一个更高效的类似Dekker的规则版本。
+     * 任务生产者和消费者通过写入/CASing ctl（即使是其当前值）来相互同步。
+     * 然而，在没有动作的情况下，访问当前值不使用CASing phase方式是需要的
+     * signalWork调用以full-volatile内存访问（这通常是需要的）来减少写争用。
      * 
      * Signalling. Signals (in signalWork) cause new or reactivated
      * workers to scan for tasks.
      *
+     * 信号。信号（在signalWork中）使新的或重新激活的工作（线程）扫描scan任务
+     *     
      * Method signalWork and its callers
      * try to approximate the unattainable goal of having the right
      * number of workers activated for the tasks at hand, but must err
-     * on the side of too many workers vs too few to avoid stalls.  If
-     * computations are purely tree structured, it suffices for every
+     * on the side of too many workers vs too few to avoid stalls.
+     *
+     * If computations are purely tree structured, it suffices for every
      * worker to activate another when it pushes a task into an empty
      * queue, resulting in O(log(threads)) steps to full activation.
      *
-     * 信号。信号（在signalWork中）使新的或重新激活的工作者（线程）扫描scan任务。
-     * 方法signalWork及其调用方试图接近为手头的任务激活正确数量的工作人员这一无法实现的目标，
-     * 但必须在工作人员过多和过少的情况下犯错，以避免停滞。如果计算是纯树结构的，
-     * 那么当每个工作者将任务推入空队列queue时，激活另一个就足够了，
+     * 使用方案
+     * 方法signalWork及其调用方试图获取已有（at home）任务而激活正确数量的工作线程
+     * 这是一无法实现的目标，
+     * 但必须在工作线程过多和过少的情况下做容错，以避免停滞。
+     *
+     * 如果计算是纯树结构的，那么当每个工作线程将任务推入空队列queue时，激活另一个就足够了，
      * 从而导致O(log(threads))步完全激活。
-     * 
+     *
      * If instead, tasks come in serially from only a single producer,
      * each worker taking its first (since the last quiescence) task
      * from a queue should signal another if there are more tasks in
      * that queue. This is equivalent to, but generally faster than,
      * arranging the stealer take two tasks, re-pushing one on its own
      * queue, and signalling (because its queue is empty), also
-     * resulting in logarithmic full activation time. Because we don't
-     * know about usage patterns (or most commonly, mixtures), we use
-     * both approaches.
+     * resulting in logarithmic full activation time.
      *
-     * 相反，如果任务仅从单个生产者串行进入，则每个从队列中获取其第一个（自上次静止以来）
-     * 任务的工作者应在该队列中有更多任务时向另一个发出信号。
-     * 这相当于，但通常比安排窃取者执行两项任务更快，
+     * Because we don't know about usage patterns (or most commonly, mixtures),
+     * we use both approaches.
+     *
+     * 如果任务仅从单个生产者串行进入，则每个从队列中获取其第一个（自上次静止以来）
+     * 任务的工作线程应在该队列中有更多任务时向另一个发出信号。
+     * 这相当于，但通常比安排窃取线程者执行两项任务更快，
      * 在其自己的队列中重新推送一项任务，并发出信号（因为其队列是空的），
-     * 这也导致对数完全激活时间。因为我们不知道使用模式（或者最常见的混合模式），
-     * 所以我们使用这两种方法。
+     * 这也导致对数完全激活时间。
+     *
+     * 因为我们不知道使用模式（或者最常见的混合模式），所以我们使用这两种方法。
      * 
      * We approximate the second rule by arranging
      * that workers in scan() do not repeat signals when repeatedly
@@ -673,12 +696,13 @@
      * contention and overhead effects may still occur during ramp-up,
      * ramp-down, and small computations involving only a few workers.
      *
-     * 我们通过记住前一条规则，scan方法中的工作人员在重复从任何给定队列中获取任务时不重复信号，
-     * 来近似第二条规则。
+     * scan方法中的工作线程通过记录前面的任务（工作线程）在重复从任何给定队列中获取任务时，
+     * 是第二条规则。
+     * 
      * 在狭窄的窗口中，这两种规则都可能适用，从而导致重复或不必要的信号。
-     * 尽管有这些限制，但这些规则通常会避免在太多工人争着承担太少任务时，
+     * 尽管有这些限制，但这些规则通常会避免在太多工作线程争着承担太少任务时，
      * 或者在生产商浪费大部分时间辞职时出现的放缓。
-     * 然而，在上升、下降和仅涉及少数工人的小型计算过程中，仍可能发生争用和开销效应。
+     * 然而，在上升、下降和仅涉及少数工作线程的小型计算过程中，仍可能发生争用和开销效应。
      * 
      * Scanning. Method scan performs top-level scanning for (and
      * execution of) tasks.  Scans by different workers and/or at
@@ -690,8 +714,8 @@
      * helpJoin, use simpler linear probes because they do not
      * systematically contend with top-level scans.)
      *
-     * 正在扫描。方法扫描执行任务的顶层扫描（和执行）。不同工作者（线程）和/或
-     * 不同时间的扫描不太可能以相同的顺序轮询队列。
+     * 扫描与执行。方法scan扫描执行任务的顶层扫描（和执行）。
+     * 不同工作者（线程）和/或不同时间的扫描不太可能以相同的顺序轮询队列。
      * 每次扫描从随机索引开始，并使用恒定的循环穷举步幅，以伪随机排列顺序遍历并尝试从每个队列轮询；
      * 在争用时重新启动。
      * （非顶级扫描；例如，在helpJoin中，使用更简单的线性探针，因为它们不会系统地与顶级扫描竞争。）
@@ -712,7 +736,7 @@
      * 扫描不会明确考虑核心相关性、负载、缓存位置等。
      * 但是，它们确实会利用时间位置（通常接近这些位置），
      * 在成功轮询后，在尝试其他轮询之前，更倾向于从同一队列重新轮询（请参阅方法topLevelExec）。
-     * 这降低了公平性，而使用一次性投票形式（tryPoll）可能会输给其他员工，这在一定程度上抵消了公平性。
+     * 这降低了公平性，而使用一次性poll形式（tryPoll）可能会输给其他工作任务，这在一定程度上抵消了公平性。
      * 
      * Deactivation. Method scan returns a sentinel when no tasks are
      * found, leading to deactivation (see awaitWork). The count
@@ -729,8 +753,9 @@
      * needed.
      *
      * 停用。scan方法扫描在找不到任务时返回一个sentinel，导致停用（请参阅awaitWork）。
-     * ctl中的计数count字段允许在去激活后准确发现静态（即，当所有工作程序都空闲时）。
-     * 然而，这也可能与新的（外部）提交竞争，因此还需要重新检查以确定静止。
+     * ctl中的计数count字段可以准确计算重新激活后任务线程静态状态
+     * （即，当所有工作程序都空闲时）。
+     * 然而，这也可能与新的（外部external）提交竞争，因此还需要重新检查以确定静止。
      * 在明显触发静止后，awaitWork会重新扫描并发出信号（如果它可能错过了信号）。
      * 在其他情况下，丢失的信号可能会暂时降低并行性，因为去激活并不一定意味着没有更多的工作，
      * 只是意味着没有其他工作者（线程）没有完成的任务。
@@ -741,7 +766,7 @@
      * time out and terminate if the pool has remained quiescent for
      * period given by field keepAlive.
      *
-     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的工作者将超时，
+     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的工作线程将超时，
      * 如果池在字段keepAlive给定的时间段内保持静止，则终止。
      * 
      * Shutdown and Termination. A call to shutdownNow invokes
@@ -836,7 +861,7 @@
      * 每个工作进程记录（在“源”source字段中）它上次从中窃取任务的队列的id。
      * scan-in方法helpJoin使用这些标记来尝试找到一个工作者（线程）
      * 来帮助（即，从中偷回任务并执行它），
-     * 该工作人员可以加快主动加入任务的完成。
+     * 该工作线程可以加快主动加入任务的完成。
      * 因此，如果要加入的任务没有被窃取，那么加入者将在其自己的本地deque上执行一个任务。
      * 
      * This is a conservative variant of the
@@ -858,10 +883,11 @@
      * tasks to run.
      *
      * 它的不同之处主要在于，我们只记录队列ID，而不是完整的依赖关系链接。
-     * 这需要对队列阵列进行线性扫描以定位窃取者，但在需要时隔离成本，而不是增加每个任务的开销。
+     * 这需要对队列阵列进行线性扫描以定位窃取工作线程，
+     * 但在需要时隔离成本，而不是增加每个任务的开销。
      * 此外，搜索仅限于直接和最多两个级别的间接窃取，之后，增加的开销会带来快速递减的回报。
-     * 当暂停延迟记录源时，搜索可能无法定位窃取程序。
-     * 此外，即使被准确识别，窃取者也可能永远不会产生一个参与者可以帮助完成的任务。
+     * 当暂停延迟记录源时，搜索可能无法定位窃取工作线程。
+     * 此外，即使被准确识别，窃取工作线程也可能永远不会产生一个参与者可以帮助完成的任务。
      * 因此，在找不到要运行的任务时会尝试进行补偿。
      * 
      * Joining CountedCompleters (see helpComplete) differs from (and
@@ -951,7 +977,8 @@
      *
      * 公共池并行度零的保证仅限于调用方以树结构方式连接或使用CountedCompleters的任务
      * （jdk parallelStreams也是如此）。
-     * 支持渗透到几种方法中，包括那些重试帮助步骤的方法，直到我们确定如果没有工作者，则不适用。
+     * 支持渗透到几种方法中，包括那些重试帮助步骤的方法，
+     * 直到我们确定如果没有工作者线程，则不适用。
      * 
      * As a more appropriate default in managed environments, unless
      * overridden by system properties, we use workers of subclass
@@ -964,7 +991,7 @@
      *
      * 作为托管环境中更合适的默认值，除非被系统属性覆盖，否则当存在SecurityManager时，
      * 我们使用子类InnocousForkJoinWorkerThread的worker。
-     * 这些工作者没有权限集，不属于任何用户定义的ThreadGroup，
+     * 这些工作线程没有权限集，不属于任何用户定义的ThreadGroup，
      * 并且在执行任何顶级任务后擦除所有ThreadLocals。
      * 相关的机制可能依赖于JVM，并且必须访问特定的线程类字段才能达到这种效果。
      * 
@@ -1099,6 +1126,71 @@
      */
 public class ForkJoinPool_Comm{
     
+        final int helpJoin(ForkJoinTask<?> task, WorkQueue w, boolean canHelp) {
+        int s = 0;
+        if (task != null && w != null) {
+            int wsrc = w.source, wid = w.config & SMASK, r = wid + 2;
+            boolean scan = true;
+            long c = 0L;           // track ctl stability 追踪ctl稳定性
+            outer: for (;;) {
+                if ((s = task.status) < 0)
+                    break;
+                else if (scan = !scan) {// previous scan was empty 上一次扫描为空
+                    if (mode < 0)
+                        ForkJoinTask.cancelIgnoringExceptions(task);
+                    else if (c == (c = ctl) && (s = tryCompensate(c)) >= 0)
+                        break;      // block
+                }
+                else if (canHelp) { // scan for subtasks 扫描子任务
+                    WorkQueue[] qs = queues;
+                    int n = (qs == null) ? 0 : qs.length, m = n - 1;
+                    // r 基于 w.config的计数，共享队列操作
+                    for (int i = n; i > 0; i -= 2, r += 2) {
+                        int j; WorkQueue q, x, y; ForkJoinTask<?>[] a;
+                        if ((q = qs[j = r & m]) != null) {
+                            int sq = q.source & SMASK, cap, b;
+                            if ((a = q.array) != null && (cap = a.length) > 0) {
+                                int k = (cap - 1) & (b = q.base);
+                                //SRC          = 1 << 17;
+                                int nextBase = b + 1, src = j | SRC, sx;
+                                ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
+                                boolean eligible = sq == wid ||
+                                    ((x = qs[sq & m]) != null &&   // indirect 间接的
+                                     //SMASK        = 0xffff;
+                                     //SMASK:	65535	1111111111111111
+                                     ((sx = (x.source & SMASK)) == wid ||
+                                      ((y = qs[sx & m]) != null && // 2-indirect
+                                       (y.source & SMASK) == wid))); //主任务id
+                                if ((s = task.status) < 0){
+                                    break outer;
+                                }
+                                else if ((q.source & SMASK) != sq ||
+                                         q.base != b){
+                                    scan = true;  // inconsistent 不一致的
+                                }
+                                else if (t == null){
+                                    scan |= (a[nextBase & (cap - 1)] != null ||
+                                             q.top != b); // lagging 滞后
+                                }
+                                else if (eligible) {
+                                    if (WorkQueue.casSlotToNull(a, k, t)) {
+                                        q.base = nextBase;
+                                        w.source = src;
+                                        t.doExec();
+                                        w.source = wsrc;
+                                    }
+                                    scan = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return s;
+    }
+    
     /**
      * Scans for and returns a polled task, if available.  Used only
      * for untracked polls. Begins scan at an index (scanRover)
@@ -1177,6 +1269,25 @@ public class ForkJoinPool_Comm{
             }
             return t;
         }
+        
+        //
+        final void topLevelExec(ForkJoinTask<?> task, WorkQueue q) {
+            int cfg = config, nstolen = 1;
+            while (task != null) {
+                task.doExec();
+                if ((task = nextLocalTask(cfg)) == null &&
+                    q != null && (task = q.tryPoll()) != null)
+                    ++nstolen;
+            }
+            nsteals += nstolen;
+            // lock状态, 共享队列
+            source = 0;
+            if ((cfg & INNOCUOUS) != 0)
+                ThreadLocalRandom.eraseThreadLocals(Thread.currentThread());
+        }
+        
+        
     }
+    
     
 }
