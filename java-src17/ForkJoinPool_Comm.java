@@ -119,7 +119,7 @@
      * 主要的差异最终源于GC的要求，即我们尽快清空占用的插槽，以保持尽可能小的占地面积，
      * 即使在生成大量任务的程序中也是如此。
      * 为了实现这一点，我们将CAS对弹出pop与轮询poll（窃取）的仲裁从位于索引
-     * （“基础base”和“顶部top”）转移到插槽本身。
+     * （“底部ase”和“顶部top”）转移到插槽本身。
      *
      * Adding tasks then takes the form of a classic array push(task)
      * in a circular buffer:
@@ -132,7 +132,7 @@
      * signals waiting workers to start scanning -- see below.
      *
      * 实际的代码需要对数组进行null检查和大小检查，使用掩码（power-of-two-sized取模），
-     * 强制执行内存排序（memory ordering），支持调整大小，并可能通知等待的工作人员开始扫描。
+     * 强制执行内存排序（memory ordering），支持调整大小，并可能通知等待的工作线程开始扫描。
      * 
      * The pop operation (always performed by owner) is of the form:
      * 弹出pop操作（始终由所有者执行owner）的形式如下：
@@ -160,6 +160,7 @@
      * It avoids some overhead because the queue cannot be growing
      * during call.
      *
+     * 
      * 这可能由于争用而失败，并且可能会重试。
      * 在尝试CAS之前，实现必须确保基本索引和任务的快照一致（通过循环或在其他地方尝试）。
      * 实际上没有这种形式的方法，因为在不同的上下文中，
@@ -200,12 +201,80 @@
      * 由于底部索引base和顶top索引（以及在许多访问中的其他池pool
      * 或数组array字段的方法）
      * 
-     * 只是不精确地定位从何处提取，
-     * 除了getAndSet/CAS/setVolatile访问元素以外，
-     * 其它的访问以任何序（内存访问），我们使用普通模式plain mode方式。
+     * 只是不精确地定位从何处提取任务时，我们使用普通模式plain mode方式
+     * 使用getAndSet/CAS/setVolatile访问元素支持其它的访问以任何序（内存访问.
      * 但我们仍然必须在一些方法（主要是那些可以从外部访问的方法）
      * 前面加上一个acquireFence，以避免无限的过时。
-     * 
+     *
+     * array赋值：
+     *  WorkQueue： 
+     *      growArray
+     *          VarHandle.releaseFence();     // fill before publish
+     *          array = newArray;
+     *      读a = q.array方式
+     *          
+     *   ForkJoinPool.WorkQueue
+     *      读方式：ForkJoinTask<?>[] a = array;
+     *          push
+     *          lockedPush
+     *          growArray
+     *          pop
+     *          tryUnpush
+     *          externalTryUnpush
+     *          tryRemove
+     *          tryPoll
+     *          nextLocalTask
+     *          peek
+     *          helpComplete
+     *          helpAsyncBlocker
+     *          
+     *   registerWorker(WorkQueue w)
+     *      w.array = new ForkJoinTask<?>[INITIAL_QUEUE_CAPACITY];
+     *      读a = q.array方式   
+     *          scan
+     *          awaitWork
+     *          canStop
+     *          helpJoin
+     *          helpComplete
+     *          pollScan
+     *
+     *   getSlot：(ForkJoinTask<?>)QA.getAcquire(a, i)
+     *      ForkJoinPool
+     *          scan
+     *          helpJoin
+     *          helpComplete
+     *          pollScan
+     *          helpQuiescePool
+     *     ForkJoinPool.WorkQueue     
+     *          tryPoll
+     *          helpAsyncBlocker
+     *
+     *   casSlotToNull：QA.compareAndSet(a, i, c, null);
+     *      ForkJoinPool
+     *          scan(WorkQueue, int, int)
+     *          helpJoin(ForkJoinTask<?>, WorkQueue, boolean)
+     *          helpComplete
+     *          pollScan(boolean)
+     *          helpQuiescePool(WorkQueue, long, boolean)
+     *     ForkJoinPool.WorkQueue
+     *          tryUnpush(ForkJoinTask<?>)
+     *          externalTryUnpush(ForkJoinTask<?>)
+     *          tryRemove(ForkJoinTask<?>, boolean)
+     *          tryPoll()
+     *          helpComplete(ForkJoinTask<?>, boolean, int)
+     *          helpAsyncBlocker(ManagedBlocker)
+     *
+     *   getAndClearSlot：QA.getAndSet(a, i, null)
+     *      ForkJoinPool.WorkQueue
+     *          growArray()
+     *          pop()
+     *          tryRemove(ForkJoinTask<?>, boolean)
+     *          nextLocalTask(int)
+     *          
+     *   setSlotVolatile：QA.setVolatile(a, i, v);
+     *      ForkJoinPool.WorkQueue
+     *          push
+     *          
      * base直接写q.base = nextBase，在如下方法中使用
      * scan、helpJoin、helpQuiescePool
      * 
@@ -245,6 +314,7 @@
      * getSlot方法实现访问Task任务数组
      * scan、helpJoin、helpComplete、pollScan、helpQuiescePool和
      * 队列本身的tryPoll、helpAsyncBlocker通过getSlot来获取数组的值。
+     *
      * 
      * Because indices and slot contents cannot always be consistent,
      * the emptiness check base == top is only quiescently accurate
@@ -273,7 +343,7 @@
      *
      * 主要是因为插槽slots与索引之间存在这些潜在的不一致性，
      * 单独考虑的轮询poll操作并非免费等待wait-free。
-     * 一个小偷（线程）不能成功地继续，直到另一个正在进行的盗取工作者（线程）
+     * 一个盗取（线程）不能成功地继续，直到另一个正在进行的盗取工作者（线程）
      * （或者，如果之前是空的empty，则是推push）明显完成。
      * 
      * This can stall threads when required to consume
@@ -293,8 +363,8 @@
      * 当需要从给定队列（可能会旋转spin）消耗时，这可能会暂停线程。
      * 然而，总的来说，我们至少在检查静止（本质上是阻塞blocking）之前确保
      * 概率上的非阻塞性：
-     * 如果尝试盗窃失败，扫描小偷会选择另一个受害者victim目标进行下一次尝试。
-     * 因此，为了让一个小偷（线程）进步，任何正在进行的轮询poll或
+     * 如果尝试盗窃失败，扫描盗取会选择另一个任务对象（victim）目标进行下一次尝试。
+     * 因此，为了让一个小偷（线程）取得进展，任何正在进行的轮询poll或
      * 对任何空队列的新推送push都足以完成。
      * 
      * 最糟糕的情况发生在许多线程正在寻找由停滞的生成器生成的任务时。
@@ -328,23 +398,23 @@
      * The ThreadLocalRandom probe value serves as a hash code for
      * choosing existing queues, and may be randomly repositioned upon
      * contention with other submitters.
-     * In essence, submitters act
-     * like workers except that they are restricted to executing local
-     * tasks that they submitted (or when known, subtasks thereof).
-     * Insertion of tasks in shared mode requires a lock. We use only
-     * a simple spinlock (using field "source"), because submitters
-     * encountering a busy queue move to a different position to use
-     * or create other queues.
-     * They block only when registering new
-     * queues.
+     * In essence, submitters act like workers except that they are
+     * restricted to executing local tasks that
+     * they submitted (or when known, subtasks thereof).
      *
      * ThreadLocalRandom探测值用作选择现有队列的哈希代码，并且可以在与其他提交者发生争用时
      * 随机重新定位。
      * 本质上，提交者的行为就像工作者（线程），只是他们被限制执行他们提交的本地任务
      * （或者在已知的情况下，执行其子任务subtasks）。
+     *
+     * Insertion of tasks in shared mode requires a lock. We use only
+     * a simple spinlock (using field "source"), because submitters
+     * encountering a busy queue move to a different position to use
+     * or create other queues.
+     * They block only when registering new queues.
      * 
      * 在共享模式下插入任务需要锁定。我们只使用一个简单的spinlock（使用字段“source”），
-     * 因为遇到繁忙队列的提交者会移动到不同的位置来使用或创建其他队列。
+     * 移动到不同的位置来使用或创建其他队列，提交者会遇到遇到繁忙队列。
      * 它们仅在注册新队列时才会阻止。
      *                                                 
      *  Runs the given (stolen) task if nonnull, as well as remaining
@@ -1028,5 +1098,85 @@
      *   many minor reworkings to improve consistency.
      */
 public class ForkJoinPool_Comm{
+    
+    /**
+     * Scans for and returns a polled task, if available.  Used only
+     * for untracked polls. Begins scan at an index (scanRover)
+     * advanced on each call, to avoid systematic unfairness.
+     * 扫描并返回轮询任务（如果可用）。仅用于未跟踪的poll调查。
+     * 在每次调用时都以高级索引（scanRover）开始扫描，以避免系统性的不公平。
+     * 
+     * @param submissionsOnly if true, only scan submission queues
+     *  参数：submissionsOnly–如果为true，则仅扫描提交队列
+     */
+    private ForkJoinTask<?> pollScan(boolean submissionsOnly) {
+        VarHandle.acquireFence();
+        int r = scanRover += 0x61c88647; // Weyl increment; raciness OK
+        if (submissionsOnly)             // even indices only
+            r &= ~1;
+        int step = (submissionsOnly) ? 2 : 1;
+        WorkQueue[] qs; int n;
+        while ((qs = queues) != null && (n = qs.length) > 0) {
+            boolean scan = false;
+            for (int i = 0; i < n; i += step) {
+                int j, cap, b; WorkQueue q; ForkJoinTask<?>[] a;
+                if ((q = qs[j = (n - 1) & (r + i)]) != null &&
+                    (a = q.array) != null && (cap = a.length) > 0) {
+                    int k = (cap - 1) & (b = q.base), nextBase = b + 1;
+                    ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
+                    if (q.base != b){
+                        scan = true;
+                    }
+                    else if (t == null){
+                        scan |= (q.top != b || a[nextBase & (cap - 1)] != null);
+                    }
+                    else if (!WorkQueue.casSlotToNull(a, k, t)){
+                        scan = true;
+                    }
+                    else {
+                        q.setBaseOpaque(nextBase);
+                        return t;
+                    }
+                }
+            }
+            if (!scan && queues == qs){
+                break;
+            }
+        }
+        return null;
+    }
+    
+     final ForkJoinTask<?> nextTaskFor(WorkQueue w) {
+        ForkJoinTask<?> t;
+        if (w == null || (t = w.nextLocalTask(w.config)) == null)
+            t = pollScan(false);
+        return t;
+    }
+    
+    static class WorkQueue{
+        /**
+         * Takes next task, if one exists, in order specified by mode.
+         */
+        final ForkJoinTask<?> nextLocalTask(int cfg) {
+            ForkJoinTask<?> t = null;
+            int s = top, cap; ForkJoinTask<?>[] a;
+            if ((a = array) != null && (cap = a.length) > 0) {
+                for (int b, d;;) {
+                    if ((d = s - (b = base)) <= 0)
+                        break;
+                    if (d == 1 || (cfg & FIFO) == 0) {
+                        if ((t = getAndClearSlot(a, --s & (cap - 1))) != null)
+                            top = s;
+                        break;
+                    }
+                    if ((t = getAndClearSlot(a, b++ & (cap - 1))) != null) {
+                        setBaseOpaque(b);
+                        break;
+                    }
+                }
+            }
+            return t;
+        }
+    }
     
 }
