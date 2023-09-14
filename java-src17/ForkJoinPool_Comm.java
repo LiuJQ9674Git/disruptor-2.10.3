@@ -635,7 +635,8 @@
      * synchronization surrounding activation. This uses a more
      * efficient version of a Dekker-like rule that task producers and
      * consumers sync with each other by both writing/CASing ctl (even
-     * if to its current value).  However, rather than CASing ctl to
+     * if to its current value).
+     * However, rather than CASing ctl to
      * its current value in the common case where no action is
      * required, we reduce write contention by ensuring that
      * signalWork invocations are prefaced with a full-volatile memory
@@ -1129,7 +1130,153 @@
      */
 public class ForkJoinPool_Comm{
     
-        final int helpJoin(ForkJoinTask<?> task, WorkQueue w, boolean canHelp) {
+    /*
+     * Tries to create or release a worker if too few are running.
+     */
+    final void signalWork() {
+        for (long c = ctl; c < 0L;) {
+            int sp, i; WorkQueue[] qs; WorkQueue v;
+            if ((sp = (int)c & ~UNSIGNALLED) == 0) {  // no idle workers
+                if ((c & ADD_WORKER) == 0L)           // enough total workers
+                    break;
+                if (c == (c = compareAndExchangeCtl(
+                              c, ((RC_MASK & (c + RC_UNIT)) |
+                                  (TC_MASK & (c + TC_UNIT)))))) {
+                    createWorker();
+                    break;
+                }
+            }
+            else if ((qs = queues) == null)
+                break;                                // unstarted/terminated
+            else if (qs.length <= (i = sp & SMASK))
+                break;                                // terminated
+            else if ((v = qs[i]) == null)
+                break;                                // terminating
+            else {
+                long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
+                Thread vt = v.owner;
+                if (c == (c = compareAndExchangeCtl(c, nc))) {
+                    v.phase = sp;
+                    LockSupport.unpark(vt);           // release idle worker
+                    break;
+                }
+            }
+        }
+    }
+    
+        /**
+     * Scans for and if found executes top-level tasks: Tries to poll
+     * each queue starting at a random index with random stride,
+     * returning source id or retry indicator if contended or
+     * inconsistent.
+     *
+     * @param w caller's WorkQueue
+     * @param prevSrc the previous queue stolen from in current phase, or 0
+     * @param r random seed
+     * @return id of queue if taken, negative if none found, prevSrc for retry
+     */
+    private int scan(WorkQueue w, int prevSrc, int r) {
+        WorkQueue[] qs = queues;
+        int n = (w == null || qs == null) ? 0 : qs.length;
+        for (int step = (r >>> 16) | 1, i = n; i > 0; --i, r += step) {
+            int j, cap, b; WorkQueue q; ForkJoinTask<?>[] a;
+            if ((q = qs[j = r & (n - 1)]) != null && // poll at qs[j].array[k]
+                (a = q.array) != null && (cap = a.length) > 0) {
+                int k = (cap - 1) & (b = q.base), nextBase = b + 1;
+                int nextIndex = (cap - 1) & nextBase, src = j | SRC;
+                ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
+                if (q.base != b)                // inconsistent
+                    return prevSrc;
+                else if (t != null && WorkQueue.casSlotToNull(a, k, t)) {
+                    q.base = nextBase;
+                    ForkJoinTask<?> next = a[nextIndex];
+                    if ((w.source = src) != prevSrc && next != null)
+                        signalWork();           // propagate
+                    w.topLevelExec(t, q);
+                    return src;
+                }
+                else if (a[nextIndex] != null)  // revisit
+                    return prevSrc;
+            }
+        }
+        return (queues != qs) ? prevSrc: -1;    // possibly resized
+    }
+    
+        /**
+     * Advances worker phase, pushes onto ctl stack, and awaits signal
+     * or reports termination.
+     *
+     * @return negative if terminated, else 0
+     */
+    private int awaitWork(WorkQueue w) {
+        if (w == null)
+            return -1;                       // already terminated
+        int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;
+        w.phase = phase | UNSIGNALLED;       // advance phase
+        long prevCtl = ctl, c;               // enqueue
+        do {
+            w.stackPred = (int)prevCtl;
+            c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
+        } while (prevCtl != (prevCtl = compareAndExchangeCtl(prevCtl, c)));
+
+        Thread.interrupted();                // clear status
+        LockSupport.setCurrentBlocker(this); // prepare to block (exit also OK)
+        long deadline = 0L;                  // nonzero if possibly quiescent
+        int ac = (int)(c >> RC_SHIFT), md;
+        if ((md = mode) < 0)                 // pool is terminating
+            return -1;
+        else if ((md & SMASK) + ac <= 0) {
+            boolean checkTermination = (md & SHUTDOWN) != 0;
+            if ((deadline = System.currentTimeMillis() + keepAlive) == 0L)
+                deadline = 1L;               // avoid zero
+            WorkQueue[] qs = queues;         // check for racing submission
+            int n = (qs == null) ? 0 : qs.length;
+            for (int i = 0; i < n; i += 2) {
+                WorkQueue q; ForkJoinTask<?>[] a; int cap, b;
+                if (ctl != c) {              // already signalled
+                    checkTermination = false;
+                    break;
+                }
+                else if ((q = qs[i]) != null &&
+                         (a = q.array) != null && (cap = a.length) > 0 &&
+                         ((b = q.base) != q.top || a[(cap - 1) & b] != null ||
+                          q.source != 0)) {
+                    if (compareAndSetCtl(c, prevCtl))
+                        w.phase = phase;     // self-signal
+                    checkTermination = false;
+                    break;
+                }
+            }
+            if (checkTermination && tryTerminate(false, false))
+                return -1;                   // trigger quiescent termination
+        }
+
+        for (boolean alt = false;;) {        // await activation or termination
+            if (w.phase >= 0)
+                break;
+            else if (mode < 0)
+                return -1;
+            else if ((c = ctl) == prevCtl)
+                Thread.onSpinWait();         // signal in progress
+            else if (!(alt = !alt))          // check between park calls
+                Thread.interrupted();
+            else if (deadline == 0L)
+                LockSupport.park();
+            else if (deadline - System.currentTimeMillis() > TIMEOUT_SLOP)
+                LockSupport.parkUntil(deadline);
+            else if (((int)c & SMASK) == (w.config & SMASK) &&
+                     compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
+                                          (prevCtl & SP_MASK)))) {
+                w.config |= QUIET;           // sentinel for deregisterWorker
+                return -1;                   // drop on timeout
+            }
+            else if ((deadline += keepAlive) == 0L)
+                deadline = 1L;               // not at head; restart timer
+        }
+        return 0;
+    }
+
+    final int helpJoin(ForkJoinTask<?> task, WorkQueue w, boolean canHelp) {
         int s = 0;
         if (task != null && w != null) {
             int wsrc = w.source, wid = w.config & SMASK, r = wid + 2;
@@ -1267,6 +1414,128 @@ public class ForkJoinPool_Comm{
                 ThreadLocalRandom.eraseThreadLocals(Thread.currentThread());
         }    
         
+    /**
+     * Extra helpJoin steps for CountedCompleters.  Scans for and runs
+     * subtasks of the given root task, returning if none are found.
+     *
+     * @param task root of CountedCompleter computation
+     * @param w caller's WorkQueue
+     * @param owned true if owned by a ForkJoinWorkerThread
+     * @return task status on exit
+     */
+    final int helpComplete(ForkJoinTask<?> task, WorkQueue w, boolean owned) {
+        int s = 0;
+        if (task != null && w != null) {
+            int r = w.config;
+            boolean scan = true, locals = true;
+            long c = 0L;
+            outer: for (;;) {
+                if (locals) {                     // try locals before scanning
+                    if ((s = w.helpComplete(task, owned, 0)) < 0)
+                        break;
+                    locals = false;
+                }
+                else if ((s = task.status) < 0)
+                    break;
+                else if (scan = !scan) {
+                    if (c == (c = ctl))
+                        break;
+                }
+                else {                            // scan for subtasks
+                    WorkQueue[] qs = queues;
+                    int n = (qs == null) ? 0 : qs.length;
+                    for (int i = n; i > 0; --i, ++r) {
+                        int j, cap, b; WorkQueue q; ForkJoinTask<?>[] a;
+                        boolean eligible = false;
+                        if ((q = qs[j = r & (n - 1)]) != null &&
+                            (a = q.array) != null && (cap = a.length) > 0) {
+                            int k = (cap - 1) & (b = q.base), nextBase = b + 1;
+                            ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
+                            if (t instanceof CountedCompleter) {
+                                CountedCompleter<?> f = (CountedCompleter<?>)t;
+                                do {} while (!(eligible = (f == task)) &&
+                                             (f = f.completer) != null);
+                            }
+                            if ((s = task.status) < 0)
+                                break outer;
+                            else if (q.base != b)
+                                scan = true;       // inconsistent
+                            else if (t == null)
+                                scan |= (a[nextBase & (cap - 1)] != null ||
+                                         q.top != b);
+                            else if (eligible) {
+                                if (WorkQueue.casSlotToNull(a, k, t)) {
+                                    q.setBaseOpaque(nextBase);
+                                    t.doExec();
+                                    locals = true;
+                                }
+                                scan = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return s;
+    }
+    
+    /**
+     * Tries to decrement counts (sometimes implicitly) and possibly
+     * arrange for a compensating worker in preparation for
+     * blocking. May fail due to interference, in which case -1 is
+     * returned so caller may retry. A zero return value indicates
+     * that the caller doesn't need to re-adjust counts when later
+     * unblocked.
+     *
+     * @param c incoming ctl value
+     * @return UNCOMPENSATE: block then adjust, 0: block, -1 : retry
+     */
+    private int tryCompensate(long c) {
+        Predicate<? super ForkJoinPool> sat;
+        int md = mode, b = bounds;
+        // counts are signed; centered at parallelism level == 0
+        int minActive = (short)(b & SMASK),
+            maxTotal  = b >>> SWIDTH,
+            active    = (int)(c >> RC_SHIFT),
+            total     = (short)(c >>> TC_SHIFT),
+            sp        = (int)c & ~UNSIGNALLED;
+        if ((md & SMASK) == 0)
+            return 0;                  // cannot compensate if parallelism zero
+        else if (total >= 0) {
+            if (sp != 0) {                        // activate idle worker
+                WorkQueue[] qs; int n; WorkQueue v;
+                if ((qs = queues) != null && (n = qs.length) > 0 &&
+                    (v = qs[sp & (n - 1)]) != null) {
+                    Thread vt = v.owner;
+                    long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
+                    if (compareAndSetCtl(c, nc)) {
+                        v.phase = sp;
+                        LockSupport.unpark(vt);
+                        return UNCOMPENSATE;
+                    }
+                }
+                return -1;                        // retry
+            }
+            else if (active > minActive) {        // reduce parallelism
+                long nc = ((RC_MASK & (c - RC_UNIT)) | (~RC_MASK & c));
+                return compareAndSetCtl(c, nc) ? UNCOMPENSATE : -1;
+            }
+        }
+        if (total < maxTotal) {                   // expand pool
+            long nc = ((c + TC_UNIT) & TC_MASK) | (c & ~TC_MASK);
+            return (!compareAndSetCtl(c, nc) ? -1 :
+                    !createWorker() ? 0 : UNCOMPENSATE);
+        }
+        else if (!compareAndSetCtl(c, c))         // validate
+            return -1;
+        else if ((sat = saturate) != null && sat.test(this))
+            return 0;
+        else
+            throw new RejectedExecutionException(
+                "Thread limit exceeded replacing blocked worker");
+    }
+    
     static class WorkQueue{
         
         /**
@@ -1376,8 +1645,63 @@ public class ForkJoinPool_Comm{
                 ThreadLocalRandom.eraseThreadLocals(Thread.currentThread());
         }
         
+        //
+        /**
+         * Tries to pop and run tasks within the target's computation
+         * until done, not found, or limit exceeded.
+         *
+         * @param task root of CountedCompleter computation
+         * @param owned true if owned by a ForkJoinWorkerThread
+         * @param limit max runs, or zero for no limit
+         * @return task status on exit
+         */
+        final int helpComplete(ForkJoinTask<?> task, boolean owned, int limit) {
+            int status = 0, cap, k, p, s; ForkJoinTask<?>[] a; ForkJoinTask<?> t;
+            while (task != null && (status = task.status) >= 0 &&
+                   (a = array) != null && (cap = a.length) > 0 &&
+                   (t = a[k = (cap - 1) & (s = (p = top) - 1)])
+                   instanceof CountedCompleter) {
+                CountedCompleter<?> f = (CountedCompleter<?>)t;
+                boolean taken = false;
+                for (;;) {     // exec if root task is a completer of t
+                    if (f == task) {
+                        if (owned) {
+                            if ((taken = casSlotToNull(a, k, t)))
+                                top = s;
+                        }
+                        else if (tryLock()) {
+                            if (top == p && array == a &&
+                                (taken = casSlotToNull(a, k, t)))
+                                top = s;
+                            source = 0;
+                        }
+                        if (taken)
+                            t.doExec();
+                        else if (!owned)
+                            Thread.yield(); // tryLock failure
+                        break;
+                    }
+                    else if ((f = f.completer) == null)
+                        break;
+                }
+                if (taken && limit != 0 && --limit == 0)
+                    break;
+            }
+            return status;
+        }
+        
+        
         
     }
     
+}
+
+abstract class ForkJoinTask<V> implements Future<V>, Serializable {
     
+ final V joinForPoolInvoke(ForkJoinPool pool) {
+        int s = awaitDone(pool, false, false, false, 0L);
+        if ((s & ABNORMAL) != 0)
+            reportException(s);
+        return getRawResult();
+    }
 }
