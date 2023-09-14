@@ -1009,6 +1009,109 @@ public class ForkJoinPool extends AbstractExecutorService {
         return (int)POOLIDS.getAndAdd(x);
     }
 
+    // 发送信号
+    
+    /*
+     * Tries to create or release a worker if too few are running.
+     * 如果运行的工作线程太少，则尝试创建或释放工作线程。
+     * ctl:	-4222399528566784
+     *1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
+     *
+     *TC_MASK:	281470681743360  0xffffL<<32 低32为0
+     *                    1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
+     *RC_MASK:	-281474976710656 0xff ffL>>48
+     *1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+     *
+     *UNSIGNALLED:	-2147483648	Bit->:1 << 31 取负数（取反）和TC_MASK差一位，即32为1
+     *1111 1111 1111 1111 1111 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
+     *~UNSIGNALLED:	2147483647	               32位为0
+     *                                         111 1111 1111 1111 1111 1111 1111 1111
+     *                                         
+     *  this.ctl = ((((long)(-corep) << TC_SHIFT) & TC_MASK) | //核数（线程数、工作者数）
+     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数                                         
+     */
+    final void signalWork() {
+        // ctl:	-4222399528566784
+        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
+        for (long c = ctl; c < 0L;) {
+            int sp, i; WorkQueue[] qs; WorkQueue v;
+            // 没有闲着的工作者（线程）
+            //UNSIGNALLED
+            //1111111111111111111111111111111110000000000000000000000000000000
+            //~UNSIGNALLED
+            //                                 1111111111111111111111111111111
+            // ctl 中后31位，第32位为stop标识
+            if ((sp = (int)c & ~UNSIGNALLED) == 0) {// no idle workers
+                // 足够的工作者（线程）总数 1<<47 高16（64-48）16 为RC和TC的计数位
+                //1000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+                if ((c & ADD_WORKER) == 0L){ // enough total workers 
+                    break;
+                }
+                //int  RC_SHIFT   = 48;
+                //long RC_UNIT    = 0x0001L << RC_SHIFT;
+                //long RC_MASK    = 0xffffL << RC_SHIFT
+                
+                //
+                /int  TC_SHIFT   = 32;
+                //long TC_UNIT    = 0x0001L << TC_SHIFT;
+                //long TC_MASK    = 0xffffL << TC_SHIFT;
+                
+                //RC_MASK
+                //1111111111111111000000000000000000000000000000000000000000000000
+                //TC_MASK
+                //                111111111111111100000000000000000000000000000000
+                //RC_UNIT:	281474976710656
+                //               1000000000000000000000000000000000000000000000000
+                //TC_UNIT:	4294967296
+                //                               100000000000000000000000000000000
+                if (c == (c = compareAndExchangeCtl(
+                              c, ((RC_MASK & (c + RC_UNIT)) | // RC增加
+                                  (TC_MASK & (c + TC_UNIT)))))) { // TC增加
+                    createWorker();
+                    break;
+                }
+            }
+            else if ((qs = queues) == null){
+                break;               // unstarted/terminated 未启动/已终止
+            }
+            // SMASK:	65535	Bit->:1111 1111 1111 1111
+            // sp的后16位 size= 32 bit:10 0000
+            // Integer.numberOfLeadingZeros,最高位为0的个数 
+            // int size = 1 << (33 - Integer.numberOfLeadingZeros(p - 1));
+            // size : 32 
+            else if (qs.length <= (i = sp & SMASK)){ //= 0xff ff ff ffL
+                break;              // terminated 已终止
+            }
+            else if ((v = qs[i]) == null){ // i是0xff ff ff ff 16位
+                break;             // terminating 正在终止
+            }
+            else {
+                //SP_MASK  f*8 4294967295
+                //                                11111111111111111111111111111111
+                //UC_MASK: ~SP_MASK f*8 0*8
+                //1111111111111111111111111111111100000000000000000000000000000000
+                //SMASK:	65535	n1111111111111111
+                //UC_MASK:	-4294967296
+                //1111111111111111111111111111111100000000000000000000000000000000
+                //SP_MASK:	4294967295
+                //                                11111111111111111111111111111111
+                //RC_UNIT:	281474976710656
+                //               1000000000000000000000000000000000000000000000000
+                //TC_UNIT:	4294967296
+                //                               100000000000000000000000000000000
+                // v是取自当前的ctl值
+                // stackPred 发送信号中的stackPred 在注册任务和等待任务中写入
+                long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
+                Thread vt = v.owner;
+                if (c == (c = compareAndExchangeCtl(c, nc))) {
+                    v.phase = sp;
+                    LockSupport.unpark(vt);  // release idle worker 释放空闲工作者（线程）
+                    break;
+                }
+            }
+        }
+    }
+    
     // Creating, registering and deregistering workers 创建、注册和注销工作者（线程）
 
     /**
@@ -1223,6 +1326,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                 int nextIndex = (cap - 1) & nextBase, src = j | SRC;
                 // 底部子任务
                 ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
+                // q是r为基础定位的队列
                 if (q.base != b)                // inconsistent
                     return prevSrc;
                 else if (t != null && WorkQueue.casSlotToNull(a, k, t)) {
@@ -1231,6 +1335,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                     // 下一个子任务ForkJoinTask
                     ForkJoinTask<?> next = a[nextIndex];
                     // 主工作任务 j的任务不是参数传入的prevSrc，存在子队列中存在下一个任务
+                    // source对本队列w赋值为主队列数组的位置
                     if ((w.source = src) != prevSrc && next != null){
                         //传播/产生任务 调用createWorker生产线程
                         signalWork();           // propagate 
@@ -1262,12 +1367,6 @@ public class ForkJoinPool extends AbstractExecutorService {
 
         //SS_SEQ:	65536	1<<16                       -16
         //                                              10000000000000000
-
-        //UNSIGNALLED:	-2147483648 f*8 64位
-        //                                 31
-        //                                 -
-        //1111111111111111111111111111111110000000000000000000000000000000
-        
         //~UNSIGNALLED:	2147483647	       31
         //                                 1111111111111111111111111111111
         // ~UNSIGNALLED 7+f*7 31位
@@ -1279,16 +1378,22 @@ public class ForkJoinPool extends AbstractExecutorService {
         //                                           
         // w.phase + SS_SEQ 使得位标记到17~31位置段，即INT的高16段
         // & ~UNSIGNALLED 执行之后，低16段清零
-        int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;
+        int phase = (w.phase + SS_SEQ) & ~UNSIGNALLED;        
+        // 下面取或|操作之后，w.phase的高32位1，即是负值
+        // 当前任务线程队列信息
+                //UNSIGNALLED:	-2147483648 f*8 64位
+        //                                 31
+        //                                 -
         //1111111111111111111111111111111110000000000000000000000000000000
         //                                               10000000000000000
-        // 下面取或|操作之后，w.phase的高32位1，即是负值
         w.phase = phase | UNSIGNALLED;       // advance phase 推动阶段
         long prevCtl = ctl, c;               // enqueue 入队
         do {
             // ctl 默认是主队列容量RC/TC的负值
+            // stackPred更新为ctl，当前任务线程队列信息
             w.stackPred = (int)prevCtl;
-            //RC_UNIT:
+            //RC_UNIT: 48
+            //1 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
             //UC_MASK:                       -32
             //1111111111111111111111111111111100000000000000000000000000000000
             //SP_MASK                         32
@@ -1321,6 +1426,8 @@ public class ForkJoinPool extends AbstractExecutorService {
             return -1;
         }
         else if ((md & SMASK) + ac <= 0) {
+            //SHUTDOWN:	16777216	H>:	1000000	S-B->:25
+            //                                   1 0000 0000 0000 0000 0000 0000
             boolean checkTermination = (md & SHUTDOWN) != 0;
             if ((deadline = System.currentTimeMillis() + keepAlive) == 0L){
                 deadline = 1L;               // avoid zero 避免零
@@ -1328,7 +1435,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             //检查竞争提交    
             WorkQueue[] qs = queues;         // check for racing submission 
             int n = (qs == null) ? 0 : qs.length;
-            for (int i = 0; i < n; i += 2) {
+            for (int i = 0; i < n; i += 2) { //共享队列 偶数任务
                 WorkQueue q; ForkJoinTask<?>[] a; int cap, b;
                 if (ctl != c) {  // already signalled 已发出信号
                     checkTermination = false;
@@ -1337,7 +1444,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                 else if ((q = qs[i]) != null &&
                          (a = q.array) != null && (cap = a.length) > 0 &&
                          ((b = q.base) != q.top || a[(cap - 1) & b] != null ||
-                          q.source != 0)) {
+                          q.source != 0)) { // 非当前任务队列任务
                     if (compareAndSetCtl(c, prevCtl))
                         w.phase = phase;     // self-signal 自信号
                     checkTermination = false;
@@ -1399,220 +1506,6 @@ public class ForkJoinPool extends AbstractExecutorService {
         return 0;
     }
 
-    
-    /*
-     * Tries to create or release a worker if too few are running.
-     * 如果运行的工作线程太少，则尝试创建或释放工作线程。
-     * ctl:	-4222399528566784
-     *1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
-     *
-     *TC_MASK:	281470681743360  0xffffL<<32 低32为0
-     *                    1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
-     *RC_MASK:	-281474976710656 0xff ffL>>48
-     *1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
-     *
-     *UNSIGNALLED:	-2147483648	Bit->:1 << 31 取负数（取反）和TC_MASK差一位，即32为1
-     *1111 1111 1111 1111 1111 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
-     *~UNSIGNALLED:	2147483647	               32位为0
-     *                                         111 1111 1111 1111 1111 1111 1111 1111
-     *                                         
-     *  this.ctl = ((((long)(-corep) << TC_SHIFT) & TC_MASK) | //核数（线程数、工作者数）
-     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数                                         
-     */
-    final void signalWork() {
-        // ctl:	-4222399528566784
-        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
-        for (long c = ctl; c < 0L;) {
-            int sp, i; WorkQueue[] qs; WorkQueue v;
-            // 没有闲着的工作者（线程）
-            //~UNSIGNALLED
-            //                                 1111111111111111111111111111111
-            //UNSIGNALLED
-            //1111111111111111111111111111111110000000000000000000000000000000
-            if ((sp = (int)c & ~UNSIGNALLED) == 0) {// no idle workers
-                // 足够的工作者（线程）总数 1<<47
-                if ((c & ADD_WORKER) == 0L){ // enough total workers 
-                    break;
-                }
-                //int  RC_SHIFT   = 48;
-                //long RC_UNIT    = 0x0001L << RC_SHIFT;
-                //long RC_MASK    = 0xffffL << RC_SHIFT
-                
-                //
-                /int  TC_SHIFT   = 32;
-                //long TC_UNIT    = 0x0001L << TC_SHIFT;
-                //long TC_MASK    = 0xffffL << TC_SHIFT;
-                
-                //RC_MASK
-                //1111111111111111000000000000000000000000000000000000000000000000
-                //TC_MASK
-                //                111111111111111100000000000000000000000000000000
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                if (c == (c = compareAndExchangeCtl(
-                              c, ((RC_MASK & (c + RC_UNIT)) | //
-                                  (TC_MASK & (c + TC_UNIT)))))) {
-                    createWorker();
-                    break;
-                }
-            }
-            else if ((qs = queues) == null){
-                break;               // unstarted/terminated 未启动/已终止
-            }
-            //SMASK:	65535	Bit->:1111 1111 1111 1111
-            else if (qs.length <= (i = sp & SMASK)){ //= 0xff ff ff ffL(1111)
-                break;              // terminated 已终止
-            }
-            else if ((v = qs[i]) == null){
-                break;             // terminating 正在终止
-            }
-            else {
-                //SP_MASK  f*8 4294967295
-                //                                11111111111111111111111111111111
-                //UC_MASK: ~SP_MASK f*8 0*8
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SMASK:	65535	n1111111111111111
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //100000000000000000000000000000000
-                long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
-                Thread vt = v.owner;
-                if (c == (c = compareAndExchangeCtl(c, nc))) {
-                    v.phase = sp;
-                    LockSupport.unpark(vt);  // release idle worker 释放空闲工作者（线程）
-                    break;
-                }
-            }
-        }
-    }
-    
-    /**
-     * Final callback from terminating worker, as well as upon failure
-     * to construct or start a worker.  Removes record of worker from
-     * array, and adjusts counts. If pool is shutting down, tries to
-     * complete termination.
-     *
-     * 来自终止工作进程以及在构建或启动工作进程失败时的最终回调。
-     * 从数组中删除工作者的记录，并调整计数。如果池正在关闭，则尝试完成终止。
-     *
-     * 由createWorker调用
-     * 
-     * @param wt the worker thread, or null if construction failed
-     * @param ex the exception causing failure, or null if none
-     */
-    final void deregisterWorker(ForkJoinWorkerThread wt, Throwable ex) {
-        ReentrantLock lock = registrationLock;
-        WorkQueue w = null;
-        int cfg = 0;
-        if (wt != null && (w = wt.workQueue) != null && lock != null) {
-            WorkQueue[] qs; int n, i;
-            cfg = w.config;
-            long ns = w.nsteals & 0xffffffffL;
-            lock.lock();     // remove index from array 从数组中删除索引
-            if ((qs = queues) != null && (n = qs.length) > 0 &&
-                qs[i = cfg & (n - 1)] == w)
-                qs[i] = null;
-            stealCount += ns;    // accumulate steals（volatile）累积
-            lock.unlock();
-            long c = ctl; //线程总数
-            // QUIET        = 1 << 19;    // quiescing phase or source
-            // 静止阶段或源
-            // 除非自发信号，否则递减计数
-            // unless self-signalled, decrement counts
-            if ((cfg & QUIET) == 0){ 
-                // RC_SHIFT   = 48;
-                // RC_UNIT    = 0x0001L << RC_SHIFT;
-                // RC_MASK    = 0xffffL << RC_SHIFT;
-                
-                // TC_SHIFT   = 32;
-                // TC_UNIT    = 0x0001L << TC_SHIFT;
-                // TC_MASK    = 0xffffL << TC_SHIFT;
-                
-                // SP_MASK    = 0xffffffffL;
-                
-                //TC_MASK:	281470681743360
-                //                111111111111111100000000000000000000000000000000
-                //RC_MASK:	-281474976710656
-                //1111111111111111000000000000000000000000000000000000000000000000
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
-                
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                // 减小ctl值
-                do {} while (c != (c = compareAndExchangeCtl(
-                                       c, ((RC_MASK & (c - RC_UNIT)) |
-                                           (TC_MASK & (c - TC_UNIT)) |
-                                           (SP_MASK & c)))));
-            }
-            else if ((int)c == 0){  // was dropped on timeout 超时时被丢弃
-                //抑制信号（如果是最后）
-                cfg = 0;                             // suppress signal if last 
-            }
-            for (ForkJoinTask<?> t; (t = w.pop()) != null; ){
-                ForkJoinTask.cancelIgnoringExceptions(t); // cancel tasks 取消任务
-            }
-        } //
-        //SRC          = 1 << 17;       // set for valid queue ids
-        //SRC:	131072	Bit->:100000000000000000
-        if (!tryTerminate(false, false) && w != null && (cfg & SRC) != 0)
-            signalWork();  // possibly replace worker 可能更换工作者（线程）
-        if (ex != null)
-            ForkJoinTask.rethrow(ex);
-    }
-
-    // Utilities used by ForkJoinTask //////////////////////////////////////
-
-    /**
-     * Returns true if can start terminating if e nabled, or already terminated
-     * 如果可以在启用或已终止时开始终止，则返回true
-     */
-    final boolean canStop() {
-        outer: for (long oldSum = 0L;;) { // repeat until stable 重复直到稳定
-            int md; WorkQueue[] qs;  long c;
-            // STOP         = 1 << 31;
-            if ((qs = queues) == null || ((md = mode) & STOP) != 0){
-                return true;
-            }
-            // SMASK        = 0xffff;
-            // RC_SHIFT   = 48;
-            // 任务数大于0
-            //SMASK:	65535
-            //1111111111111111
-            //RC_SHIFT   = 48;
-            if ((md & SMASK) + (int)((c = ctl) >> RC_SHIFT) > 0){
-                break;
-            }
-            long checkSum = c;
-            for (int i = 1; i < qs.length; i += 2) { // scan submitters 扫描提交者
-                WorkQueue q; ForkJoinTask<?>[] a; int s = 0, cap;
-                //
-                if ((q = qs[i]) != null && (a = q.array) != null &&
-                    (cap = a.length) > 0 &&
-                    ((s = q.top) != q.base || a[(cap - 1) & s] != null ||
-                     q.source != 0))
-                    break outer;
-                checkSum += (((long)i) << 32) ^ s;
-            }
-            if (oldSum == (oldSum = checkSum) && queues == qs){
-                return true;
-            }
-        }
-        // 重查模式，返回false
-        return (mode & STOP) != 0; // recheck mode on false return 
-    }
-
     /**
      * Tries to decrement counts (sometimes implicitly) and possibly
      * arrange for a compensating worker in preparation for
@@ -1623,7 +1516,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      *
      * 尝试递减计数（有时是隐式的），并可能安排一名补偿工作者（线程）为阻塞做准备。可能由于干扰而失败，
      * 在这种情况下返回-1，因此调用者可以重试。零返回值表示调用方在以后取消阻止时不需要重新调整计数。
-     *
+     * helpJoin调用tryCompensate
+     * compensatedBlock compensatedBlock由managedBlock调用
      * @param c incoming ctl value 传入ctl值
      * @return UNCOMPENSATE: block then adjust, 0: block, -1 : retry
      */
@@ -1735,6 +1629,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                 else if (canHelp) { // scan for subtasks 扫描子任务
                     WorkQueue[] qs = queues;
                     int n = (qs == null) ? 0 : qs.length, m = n - 1;
+                    // r 基于 w.config的计数，共享队列操作
                     for (int i = n; i > 0; i -= 2, r += 2) {
                         int j; WorkQueue q, x, y; ForkJoinTask<?>[] a;
                         if ((q = qs[j = r & m]) != null) {
@@ -1750,7 +1645,7 @@ public class ForkJoinPool extends AbstractExecutorService {
                                      //SMASK:	65535	1111111111111111
                                      ((sx = (x.source & SMASK)) == wid ||
                                       ((y = qs[sx & m]) != null && // 2-indirect
-                                       (y.source & SMASK) == wid)));
+                                       (y.source & SMASK) == wid))); //主任务id
                                 if ((s = task.status) < 0){
                                     break outer;
                                 }
@@ -1848,6 +1743,208 @@ public class ForkJoinPool extends AbstractExecutorService {
             }
         }
         return s;
+    }
+
+    
+    //
+    /**
+     * Final callback from terminating worker, as well as upon failure
+     * to construct or start a worker.  Removes record of worker from
+     * array, and adjusts counts. If pool is shutting down, tries to
+     * complete termination.
+     *
+     * 来自终止工作进程以及在构建或启动工作进程失败时的最终回调。
+     * 从数组中删除工作者的记录，并调整计数。如果池正在关闭，则尝试完成终止。
+     *
+     * 由createWorker调用
+     * 
+     * @param wt the worker thread, or null if construction failed
+     * @param ex the exception causing failure, or null if none
+     */
+    final void deregisterWorker(ForkJoinWorkerThread wt, Throwable ex) {
+        ReentrantLock lock = registrationLock;
+        WorkQueue w = null;
+        int cfg = 0;
+        if (wt != null && (w = wt.workQueue) != null && lock != null) {
+            WorkQueue[] qs; int n, i;
+            cfg = w.config;
+            long ns = w.nsteals & 0xffffffffL;
+            lock.lock();     // remove index from array 从数组中删除索引
+            if ((qs = queues) != null && (n = qs.length) > 0 &&
+                qs[i = cfg & (n - 1)] == w)
+                qs[i] = null;
+            stealCount += ns;    // accumulate steals（volatile）累积
+            lock.unlock();
+            long c = ctl; //线程总数
+            // QUIET        = 1 << 19;    // quiescing phase or source
+            // 静止阶段或源
+            // 除非自发信号，否则递减计数
+            // unless self-signalled, decrement counts
+            if ((cfg & QUIET) == 0){ 
+                // RC_SHIFT   = 48;
+                // RC_UNIT    = 0x0001L << RC_SHIFT;
+                // RC_MASK    = 0xffffL << RC_SHIFT;
+                
+                // TC_SHIFT   = 32;
+                // TC_UNIT    = 0x0001L << TC_SHIFT;
+                // TC_MASK    = 0xffffL << TC_SHIFT;
+                
+                // SP_MASK    = 0xffffffffL;
+                
+                //TC_MASK:	281470681743360
+                //                111111111111111100000000000000000000000000000000
+                //RC_MASK:	-281474976710656
+                //1111111111111111000000000000000000000000000000000000000000000000
+                //UC_MASK:	-4294967296
+                //1111111111111111111111111111111100000000000000000000000000000000
+                
+                //SP_MASK:	4294967295
+                //                                11111111111111111111111111111111
+                //RC_UNIT:	281474976710656
+                //               1000000000000000000000000000000000000000000000000
+                //TC_UNIT:	4294967296
+                //                               100000000000000000000000000000000
+                // 减小ctl值
+                do {} while (c != (c = compareAndExchangeCtl(
+                                       c, ((RC_MASK & (c - RC_UNIT)) |
+                                           (TC_MASK & (c - TC_UNIT)) |
+                                           (SP_MASK & c)))));
+            }
+            else if ((int)c == 0){  // was dropped on timeout 超时时被丢弃
+                //抑制信号（如果是最后）
+                cfg = 0;                             // suppress signal if last 
+            }
+            for (ForkJoinTask<?> t; (t = w.pop()) != null; ){
+                ForkJoinTask.cancelIgnoringExceptions(t); // cancel tasks 取消任务
+            }
+        } //
+        //SRC          = 1 << 17;       // set for valid queue ids
+        //SRC:	131072	Bit->:100000000000000000
+        if (!tryTerminate(false, false) && w != null && (cfg & SRC) != 0)
+            signalWork();  // possibly replace worker 可能更换工作者（线程）
+        if (ex != null)
+            ForkJoinTask.rethrow(ex);
+    }
+    
+    
+    // Termination
+
+    /**
+     * Possibly initiates and/or completes termination.
+     * 可能启动和/或完成终止。
+     *
+     * @param now if true, unconditionally terminate, else only
+     * if no work and no active workers
+     *         现在，如果为true，则无条件终止，
+     *         否则仅在没有工作者（线程）且没有活跃线程的情况下
+     * 
+     * @param enable if true, terminate when next possible
+     *
+     *            如果为true，则启用，下一次可能时终止
+     * @return true if terminating or terminated
+     */
+    private boolean tryTerminate(boolean now, boolean enable) {
+        int md; // try to set SHUTDOWN, then STOP, then help terminate
+        // SHUTDOWN     = 1 << 24;
+        if (((md = mode) & SHUTDOWN) == 0) {//
+            if (!enable){
+                // 不能终止
+                return false;
+            }
+            md = getAndBitwiseOrMode(SHUTDOWN);
+        }
+        //  STOP         = 1 << 31;       // must be negative
+        // 已经终止
+        if ((md & STOP) == 0) {
+            if (!now && !canStop()){
+                return false;
+            }
+            //设置终止位
+            //按位原子更新访问  将获取变量的值并对其执行按位 OR 运算
+            md = getAndBitwiseOrMode(STOP);
+        }
+        for (boolean rescan = true;;) { // repeat until no changes
+            boolean changed = false;
+            for (ForkJoinTask<?> t; (t = pollScan(false)) != null; ) {
+                changed = true;
+                ForkJoinTask.cancelIgnoringExceptions(t); // help cancel
+            }
+            WorkQueue[] qs; int n; WorkQueue q; Thread thread;
+            if ((qs = queues) != null && (n = qs.length) > 0) {
+                for (int j = 1; j < n; j += 2) { // unblock other workers
+                    if ((q = qs[j]) != null && (thread = q.owner) != null &&
+                        !thread.isInterrupted()) {
+                        changed = true;
+                        try {
+                            thread.interrupt();
+                        } catch (Throwable ignore) {
+                        }
+                    }
+                }
+            }
+            ReentrantLock lock; Condition cond; // signal when no workers
+            // TERMINATED   = 1 << 25;
+            // SMASK        = 0xffff;        // short bits == max index
+            // TC_SHIFT   = 32;
+            // mode;                   // parallelism, runstate, queue mode
+            if (((md = mode) & TERMINATED) == 0 &&
+                (md & SMASK) + (short)(ctl >>> TC_SHIFT) <= 0 && //无任务
+                (getAndBitwiseOrMode(TERMINATED) & TERMINATED) == 0 &&
+                (lock = registrationLock) != null) {
+                lock.lock();
+                //终止通知
+                if ((cond = termination) != null){
+                    cond.signalAll();
+                }
+                lock.unlock();
+            }
+            if (changed)
+                rescan = true;
+            else if (rescan)
+                rescan = false;
+            else
+                break;
+        }
+        return true;
+    }
+    
+    /**
+     * Returns true if can start terminating if e nabled, or already terminated
+     * 如果可以在启用或已终止时开始终止，则返回true
+     */
+    final boolean canStop() {
+        outer: for (long oldSum = 0L;;) { // repeat until stable 重复直到稳定
+            int md; WorkQueue[] qs;  long c;
+            // STOP         = 1 << 31;
+            if ((qs = queues) == null || ((md = mode) & STOP) != 0){
+                return true;
+            }
+            // SMASK        = 0xffff;
+            // RC_SHIFT   = 48;
+            // 任务数大于0
+            //SMASK:	65535
+            //1111111111111111
+            //RC_SHIFT   = 48;
+            if ((md & SMASK) + (int)((c = ctl) >> RC_SHIFT) > 0){
+                break;
+            }
+            long checkSum = c;
+            for (int i = 1; i < qs.length; i += 2) { // scan submitters 扫描提交者
+                WorkQueue q; ForkJoinTask<?>[] a; int s = 0, cap;
+                //
+                if ((q = qs[i]) != null && (a = q.array) != null &&
+                    (cap = a.length) > 0 &&
+                    ((s = q.top) != q.base || a[(cap - 1) & s] != null ||
+                     q.source != 0))
+                    break outer;
+                checkSum += (((long)i) << 32) ^ s;
+            }
+            if (oldSum == (oldSum = checkSum) && queues == qs){
+                return true;
+            }
+        }
+        // 重查模式，返回false
+        return (mode & STOP) != 0; // recheck mode on false return 
     }
 
     // External operations
@@ -2069,87 +2166,6 @@ public class ForkJoinPool extends AbstractExecutorService {
                         8);
         }
         return 0;
-    }
-
-    // Termination
-
-    /**
-     * Possibly initiates and/or completes termination.
-     * 可能启动和/或完成终止。
-     *
-     * @param now if true, unconditionally terminate, else only
-     * if no work and no active workers
-     *         现在，如果为true，则无条件终止，
-     *         否则仅在没有工作者（线程）且没有活跃线程的情况下
-     * 
-     * @param enable if true, terminate when next possible
-     *
-     *            如果为true，则启用，下一次可能时终止
-     * @return true if terminating or terminated
-     */
-    private boolean tryTerminate(boolean now, boolean enable) {
-        int md; // try to set SHUTDOWN, then STOP, then help terminate
-        // SHUTDOWN     = 1 << 24;
-        if (((md = mode) & SHUTDOWN) == 0) {//
-            if (!enable){
-                // 不能终止
-                return false;
-            }
-            md = getAndBitwiseOrMode(SHUTDOWN);
-        }
-        //  STOP         = 1 << 31;       // must be negative
-        // 已经终止
-        if ((md & STOP) == 0) {
-            if (!now && !canStop()){
-                return false;
-            }
-            //设置终止位
-            //按位原子更新访问  将获取变量的值并对其执行按位 OR 运算
-            md = getAndBitwiseOrMode(STOP);
-        }
-        for (boolean rescan = true;;) { // repeat until no changes
-            boolean changed = false;
-            for (ForkJoinTask<?> t; (t = pollScan(false)) != null; ) {
-                changed = true;
-                ForkJoinTask.cancelIgnoringExceptions(t); // help cancel
-            }
-            WorkQueue[] qs; int n; WorkQueue q; Thread thread;
-            if ((qs = queues) != null && (n = qs.length) > 0) {
-                for (int j = 1; j < n; j += 2) { // unblock other workers
-                    if ((q = qs[j]) != null && (thread = q.owner) != null &&
-                        !thread.isInterrupted()) {
-                        changed = true;
-                        try {
-                            thread.interrupt();
-                        } catch (Throwable ignore) {
-                        }
-                    }
-                }
-            }
-            ReentrantLock lock; Condition cond; // signal when no workers
-            // TERMINATED   = 1 << 25;
-            // SMASK        = 0xffff;        // short bits == max index
-            // TC_SHIFT   = 32;
-            // mode;                   // parallelism, runstate, queue mode
-            if (((md = mode) & TERMINATED) == 0 &&
-                (md & SMASK) + (short)(ctl >>> TC_SHIFT) <= 0 && //无任务
-                (getAndBitwiseOrMode(TERMINATED) & TERMINATED) == 0 &&
-                (lock = registrationLock) != null) {
-                lock.lock();
-                //终止通知
-                if ((cond = termination) != null){
-                    cond.signalAll();
-                }
-                lock.unlock();
-            }
-            if (changed)
-                rescan = true;
-            else if (rescan)
-                rescan = false;
-            else
-                break;
-        }
-        return true;
     }
 
     // Exported methods

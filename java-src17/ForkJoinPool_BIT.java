@@ -283,30 +283,30 @@ Bit-Size->:	32			Hex-Size->:8
      *      source
      *          q.source & SMASK
      *          
-     *  状态信息写入顺序 w:写 r：读 
+     *  状态信息写入顺序 w:写 r：读  非w任务操作: q
      *                       | stackPred | config | phase | source
      *                       ------------------------------------------  
      *      new ForkJoinPool |           |    w  |        |
      *      -----------------------------------------------------------
-     *      new WorkQueue    |           |    w  |     w  |
+     *      new WorkQueue    |           |    w  |   w    |
      *      -----------------------------------------------------------
      *      submissionQueue  |           |       |        |
+     *      -----------------------------------------------------------
+     *       signalWork      |    v.r    |        |   w   |
      *      -----------------------------------------------------------
      *      registerWorker   |      w    |   w/r |       |
      *      -----------------------------------------------------------
      *      runWorker        |      r    |   w    |       |
      *      -----------------------------------------------------------
-     *      signalWork       |      r    |        |   w   |
-     *      -----------------------------------------------------------
      *      scan             |           |        |       |   w
      *      -----------------------------------------------------------
-     *      awaitWork        |      w    |    w/r |   r   |   r
+     *      awaitWork        |      w    |    w/r |   r   |   r q.r
      *      -----------------------------------------------------------
-     *      helpJoin         |           |     r  |           |   w/r
+     *      helpJoin         |           |     r  |       |   w/r q.r
      *      -----------------------------------------------------------
-     *      tryCompensate    |      r    |        |      w    |
+     *      tryCompensate    |      r    |        |   w   |
      *      -----------------------------------------------------------
-     *      helpComplete     |           |     r  |           |
+     *      helpComplete     |           |     r  |       |
      *      ----------------------------------------------------------
      *
      *      invoke -> submissionQueue-> new WorkQueue -> signalWork
@@ -316,7 +316,14 @@ Bit-Size->:	32			Hex-Size->:8
      *      ForkJoinTask invoke/join/get     -> awaitDone            
      *                                                 -> helpJoin
      *                                                 -> helpComplete
+     *      signalWork
+     *          v.phase = sp;
+     *      scan
+     *          b = q.base
+     *      helpJoin
+     *          q.base != b
      *
+     *          
      */
    
     // Bounds
