@@ -275,19 +275,22 @@
      *      ForkJoinPool.WorkQueue
      *          push
      *          
+     * base:         
      * base直接写q.base = nextBase，在如下方法中使用
-     * scan、helpJoin、helpQuiescePool
+     *  scan、helpJoin、helpQuiescePool
      * 
      * 直接读b = q.base，在如下方法中使用：
-     * scan、awaitWork、canStop、helpJoin、helpComplete、pollScan
-     * helpQuiescePool、getSurplusQueuedTaskCount
+     *  scan、awaitWork、canStop、helpJoin、helpComplete、pollScan
+     *  helpQuiescePool、getSurplusQueuedTaskCount
+     *  
      * 在队列中的使用方法：
-     * queueSize、isEmpty、push、lockedPush、pop、tryUnpush、tryRemove
-     * tryPoll、nextLocalTask、peek、helpAsyncBlocker
+     *  queueSize、isEmpty、push、lockedPush、pop、tryUnpush、tryRemove
+     *  tryPoll、nextLocalTask、peek、helpAsyncBlocker
      *
      * 原子操作：setBaseOpaque
-     * helpComplete、pollScan
-     * 队列方法：tryPoll、nextLocalTask、helpAsyncBlocker
+     *  helpComplete、pollScan
+     * 队列方法：
+     *  tryPoll、nextLocalTask、helpAsyncBlocker
      * 
      * This is equivalent to acting as if
      * callers use an acquiring read of the reference to the pool or
@@ -1245,7 +1248,94 @@ public class ForkJoinPool_Comm{
         return t;
     }
     
+    /**
+         * Runs the given (stolen) task if nonnull, as well as
+         * remaining local tasks and/or others available from the
+         * given queue.
+         */
+        final void topLevelExec(ForkJoinTask<?> task, WorkQueue q) {
+            int cfg = config, nstolen = 1;
+            while (task != null) {
+                task.doExec();
+                if ((task = nextLocalTask(cfg)) == null &&
+                    q != null && (task = q.tryPoll()) != null)
+                    ++nstolen;
+            }
+            nsteals += nstolen;
+            source = 0;
+            if ((cfg & INNOCUOUS) != 0)
+                ThreadLocalRandom.eraseThreadLocals(Thread.currentThread());
+        }    
+        
     static class WorkQueue{
+        
+        /**
+         * Pushes a task. Call only by owner in unshared queues.
+         *
+         * @param task the task. Caller must ensure non-null.
+         * @param pool (no-op if null)
+         * @throws RejectedExecutionException if array cannot be resized
+         */
+        final void push(ForkJoinTask<?> task, ForkJoinPool pool) {
+            ForkJoinTask<?>[] a = array;
+            int s = top++, d = s - base, cap, m; // skip insert if disabled
+            if (a != null && pool != null && (cap = a.length) > 0) {
+                setSlotVolatile(a, (m = cap - 1) & s, task);
+                if (d == m)
+                    growArray();
+                if (d == m || a[m & (s - 1)] == null)
+                    pool.signalWork(); // signal if was empty or resized
+            }
+        }
+
+        /**
+         * Pushes task to a shared queue with lock already held, and unlocks.
+         *
+         * @return true if caller should signal work
+         */
+        final boolean lockedPush(ForkJoinTask<?> task) {
+            ForkJoinTask<?>[] a = array;
+            int s = top++, d = s - base, cap, m;
+            if (a != null && (cap = a.length) > 0) {
+                a[(m = cap - 1) & s] = task;
+                if (d == m)
+                    growArray();
+                source = 0; // unlock
+                if (d == m || a[m & (s - 1)] == null)
+                    return true;
+            }
+            return false;
+        }
+        
+        /**
+         * Pops and returns task, or null if empty. Called only by owner.
+         */
+        private ForkJoinTask<?> pop() {
+            ForkJoinTask<?> t = null;
+            int s = top, cap; ForkJoinTask<?>[] a;
+            if ((a = array) != null && (cap = a.length) > 0 && base != s-- &&
+                (t = getAndClearSlot(a, (cap - 1) & s)) != null)
+                top = s;
+            return t;
+        }
+        
+        /**
+         * Tries once to poll next task in FIFO order, failing on
+         * inconsistency or contention.
+         */
+        final ForkJoinTask<?> tryPoll() {
+            int cap, b, k; ForkJoinTask<?>[] a;
+            if ((a = array) != null && (cap = a.length) > 0) {
+                ForkJoinTask<?> t = getSlot(a, k = (cap - 1) & (b = base));
+                if (base == b++ && t != null && casSlotToNull(a, k, t)) {
+                    setBaseOpaque(b);
+                    return t;
+                }
+            }
+            return null;
+        }
+        
+        
         /**
          * Takes next task, if one exists, in order specified by mode.
          */

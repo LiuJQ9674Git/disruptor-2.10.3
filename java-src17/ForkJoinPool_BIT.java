@@ -319,11 +319,23 @@ Bit-Size->:	32			Hex-Size->:8
      *                                                 -> helpComplete
      *      signalWork
      *          v.phase = sp;
-     *      scan
-     *          b = q.base
-     *      helpJoin
-     *          q.base != b
      *
+     *      base：
+     *          setBaseOpaque
+     *              helpComplete(ForkJoinTask<?>, WorkQueue, boolean)
+     *              pollScan(boolean)
+     *              
+     *          scan
+     *              b = q.base
+     *              
+     *          helpJoin
+     *              q.base != b
+     *              
+     *          ForkJoinPool.WorkQueue
+     *              tryPoll()
+     *              nextLocalTask(int)
+     *              helpAsyncBlocker(ManagedBlocker)
+     *              
      *     // signalWork
      *     //long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
      *
