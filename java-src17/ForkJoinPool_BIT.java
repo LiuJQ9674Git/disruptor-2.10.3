@@ -323,8 +323,29 @@ Bit-Size->:	32			Hex-Size->:8
      *      helpJoin
      *          q.base != b
      *
-     *          
+     *     // signalWork
+     *     //long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
+     *
+     *     // awaitWork
+     *    //c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
+     *
+     *    //tryCompensate
+     *    //long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
+     *
+     *    // long nc = ((RC_MASK & (c - RC_UNIT)) | (~RC_MASK & c));
+     *    // long nc = ((c + TC_UNIT) & TC_MASK) | (c & ~TC_MASK);
+     *
+     *    awaitWork
+     *       compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
+     *         //11111 1111 1111 1111 111 1111 1111 1111
+     *         (prevCtl & SP_MASK)))) {
+     *
+     *   // RC/TC 计数处1
+     *    if (c == (c = compareAndExchangeCtl(
+     *       c, ((RC_MASK & (c + RC_UNIT)) | // RC增加
+     *       (TC_MASK & (c + TC_UNIT)))))) { // TC增加      
      */
+   
    
     // Bounds
     static final int SWIDTH       = 16;          // width of short 宽度
