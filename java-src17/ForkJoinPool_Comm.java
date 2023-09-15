@@ -1,3 +1,4 @@
+public class ForkJoinPool_Comm{
 /**
      * Implementation Overview
      * This class and its nested classes provide the main
@@ -1128,7 +1129,7 @@
      *   other capabilities that had been incrementally tacked on. Plus
      *   many minor reworkings to improve consistency.
      */
-public class ForkJoinPool_Comm{
+
     
     /*
      * Tries to create or release a worker if too few are running.
@@ -1697,6 +1698,139 @@ public class ForkJoinPool_Comm{
 }
 
 abstract class ForkJoinTask<V> implements Future<V>, Serializable {
+  
+      /**
+     * Helps and/or waits for completion from join, get, or invoke;
+     * called from either internal or external threads.
+     *
+     * @param pool if nonnull, known submitted pool, else assumes current pool
+     * @param ran true if task known to have been exec'd
+     * @param interruptible true if park interruptibly when external
+     * @param timed true if use timed wait
+     * @param nanos if timed, timeout value
+     * @return ABNORMAL if interrupted, else status on exit
+     */
+    private int awaitDone(ForkJoinPool pool, boolean ran,
+                          boolean interruptible, boolean timed,
+                          long nanos) {
+        ForkJoinPool p; boolean internal; int s; Thread t;
+        ForkJoinPool.WorkQueue q = null;
+        if ((t = Thread.currentThread()) instanceof ForkJoinWorkerThread) {
+            ForkJoinWorkerThread wt = (ForkJoinWorkerThread)t;
+            p = wt.pool;
+            if (pool == null)
+                pool = p;
+            if (internal = (pool == p))
+                q = wt.workQueue;
+        }
+        else {
+            internal = false;
+            p = ForkJoinPool.common;
+            if (pool == null)
+                pool = p;
+            if (pool == p && p != null)
+                q = p.externalQueue();
+        }
+        if (interruptible && Thread.interrupted())
+            return ABNORMAL;
+        if ((s = status) < 0)
+            return s;
+        long deadline = 0L;
+        if (timed) {
+            if (nanos <= 0L)
+                return 0;
+            else if ((deadline = nanos + System.nanoTime()) == 0L)
+                deadline = 1L;
+        }
+        boolean uncompensate = false;
+        if (q != null && p != null) {  // try helping
+            // help even in timed mode if pool has no parallelism
+            boolean canHelp = !timed || (p.mode & SMASK) == 0;
+            if (canHelp) {
+                if ((this instanceof CountedCompleter) &&
+                    (s = p.helpComplete(this, q, internal)) < 0)
+                    return s;
+                if (!ran && ((!internal && q.externalTryUnpush(this)) ||
+                             q.tryRemove(this, internal)) && (s = doExec()) < 0)
+                    return s;
+            }
+            if (internal) {
+                if ((s = p.helpJoin(this, q, canHelp)) < 0)
+                    return s;
+                if (s == UNCOMPENSATE)
+                    uncompensate = true;
+            }
+        }
+        // block until done or cancelled wait
+        boolean interrupted = false, queued = false;
+        boolean parked = false, fail = false;
+        Aux node = null;
+        while ((s = status) >= 0) {
+            Aux a; long ns;
+            if (fail || (fail = (pool != null && pool.mode < 0)))
+                casStatus(s, s | (DONE | ABNORMAL)); // try to cancel
+            else if (parked && Thread.interrupted()) {
+                if (interruptible) {
+                    s = ABNORMAL;
+                    break;
+                }
+                interrupted = true;
+            }
+            else if (queued) {
+                if (deadline != 0L) {
+                    if ((ns = deadline - System.nanoTime()) <= 0L)
+                        break;
+                    LockSupport.parkNanos(ns);
+                }
+                else
+                    LockSupport.park();
+                parked = true;
+            }
+            else if (node != null) {
+                if ((a = aux) != null && a.ex != null)
+                    Thread.onSpinWait();     // exception in progress
+                else if (queued = casAux(node.next = a, node))
+                    LockSupport.setCurrentBlocker(this);
+            }
+            else {
+                try {
+                    node = new Aux(Thread.currentThread(), null);
+                } catch (Throwable ex) {     // cannot create
+                    fail = true;
+                }
+            }
+        }
+        if (pool != null && uncompensate)
+            pool.uncompensate();
+
+        if (queued) {
+            LockSupport.setCurrentBlocker(null);
+            if (s >= 0) { // cancellation similar to AbstractQueuedSynchronizer
+                outer: for (Aux a; (a = aux) != null && a.ex == null; ) {
+                    for (Aux trail = null;;) {
+                        Aux next = a.next;
+                        if (a == node) {
+                            if (trail != null)
+                                trail.casNext(trail, next);
+                            else if (casAux(a, next))
+                                break outer; // cannot be re-encountered
+                            break;           // restart
+                        } else {
+                            trail = a;
+                            if ((a = next) == null)
+                                break outer;
+                        }
+                    }
+                }
+            }
+            else {
+                signalWaiters();             // help clean or signal
+                if (interrupted)
+                    Thread.currentThread().interrupt();
+            }
+        }
+        return s;
+  }
     
  final V joinForPoolInvoke(ForkJoinPool pool) {
         int s = awaitDone(pool, false, false, false, 0L);
