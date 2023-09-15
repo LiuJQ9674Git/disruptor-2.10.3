@@ -207,7 +207,7 @@ public class ForkJoinPool_Comm{
      * 但我们仍然必须在一些方法（主要是那些可以从外部访问的方法）
      * 前面加上一个acquireFence，以避免无限的过时。
      *
-     * array赋值：
+     * array赋值：（队列实现-数组操作设计）
      *  WorkQueue： 
      *      growArray
      *          VarHandle.releaseFence();     // fill before publish
@@ -276,7 +276,7 @@ public class ForkJoinPool_Comm{
      *      ForkJoinPool.WorkQueue
      *          push
      *          
-     * base:         
+     * base: （队列实现-底索引base设计）        
      * base直接写q.base = nextBase，在如下方法中使用
      *  scan、helpJoin、helpQuiescePool
      * 
@@ -305,7 +305,7 @@ public class ForkJoinPool_Comm{
      * anyway, or an Opaque-mode write if there is no such
      * opportunity.
      *
-     * 对于array的操作
+     * 对于array的操作（队列实现-数组、索引的并发模型）
      * （赋值）相当于对池pool或队列queue的引用的读取（acquiring read）
      * 即使调用方没有这样做。
      * 当需要获取模式acquire mode但上下文无法确保时，使用显式获取读取（getSlot）
@@ -331,12 +331,14 @@ public class ForkJoinPool_Comm{
      * trigger when not completely full, causing a resize earlier than
      * required.
      *
+     *（队列实现-数组与索引的一致性设计）
      * 因为索引和槽内容不可能总是一致的，所以空性检查base==top只是静态准确的
      * （因此在足够的情况下使用）。
      * 否则，当推送push、弹出pop或轮询poll尚未完全提交时，
      * 它可能会错误地使队列显示为非空，
      * 或者当尚未看到顶部或底部的更新时，它会显示为空。
-     * 类似地，队列阵列已满的签入推送可能会在未完全满时触发，从而导致提前调整大小。
+     * 类似地，在push中检查。
+     * 当队列数组已满时可能会在未完全满时触发，从而导致提前调整大小。
      *
      * Mainly because of these potential inconsistencies among slots
      * vs indices, the poll operation, considered individually, is not
@@ -354,23 +356,24 @@ public class ForkJoinPool_Comm{
      * from a given queue (which may spin).  However, in the
      * aggregate, we ensure probabilistic non-blockingness at least
      * until checking quiescence (which is intrinsically blocking):
+     *
+     * 当需要从给定队列（可能会旋转spin）消耗时，这可能会暂停（stall 熄火）线程。
+     * 然而，总的来说，我们至少在检查静止（本质上是阻塞blocking）之前确保
+     * 概率上的非阻塞性：
      * 
      * If an attempted steal fails, a scanning thief chooses a
      * different victim target to try next. So, in order for one thief
      * to progress, it suffices for any in-progress poll or new push
      * on any empty queue to complete.
      *
+     * 如果尝试盗窃任务失败，扫描盗取会选择另一个任务对象（victim）目标进行下一次尝试。
+     * 因此，为了让一个盗取（线程）取得进展，任何正在进行的轮询poll或
+     * 对任何空队列的新推送push都足以完成。
+     * 
      * The worst cases occur when many
      * threads are looking for tasks being produced by a stalled
      * producer.
      *
-     * 当需要从给定队列（可能会旋转spin）消耗时，这可能会暂停线程。
-     * 然而，总的来说，我们至少在检查静止（本质上是阻塞blocking）之前确保
-     * 概率上的非阻塞性：
-     * 如果尝试盗窃失败，扫描盗取会选择另一个任务对象（victim）目标进行下一次尝试。
-     * 因此，为了让一个小偷（线程）取得进展，任何正在进行的轮询poll或
-     * 对任何空队列的新推送push都足以完成。
-     * 
      * 最糟糕的情况发生在许多线程正在寻找由停滞的生成器生成的任务时。
      * 
      * This approach also enables support of a user mode in which
@@ -381,6 +384,7 @@ public class ForkJoinPool_Comm{
      * although with increased contention among task producers and
      * consumers.
      *
+     * （任务实现-取任务）
      * 这种方法还支持用户模式，在这种模式下，本地任务处理是按FIFO而不是LIFO顺序进行的，
      * 只需使用轮询poll而不是弹出pop。
      * 这在任务从未加入的消息传递框架中非常有用，尽管任务生产者和消费者之间的争用会增加。
@@ -394,7 +398,7 @@ public class ForkJoinPool_Comm{
      * WorkQueues也以类似的方式用于提交到池中的任务。
      * 我们不能将这些任务混合在工作线程使用的相同队列中。
      * 相反，我们使用一种哈希形式，将提交队列与提交线程随机关联。
-     *
+     * 
      * WorkQueue池中包括外部extentalPush(Pool提交)和
      * 内部currentThread.push(this)（Task的fork提交）均在quques数组中
      * 使用线程探索哈希来绑定到线程上，减少竞争。
@@ -405,7 +409,8 @@ public class ForkJoinPool_Comm{
      * In essence, submitters act like workers except that they are
      * restricted to executing local tasks that
      * they submitted (or when known, subtasks thereof).
-     *
+     * 
+     * （任务实现-取任务）
      * ThreadLocalRandom探测值用作选择现有队列的哈希代码，并且可以在与其他提交者发生争用时
      * 随机重新定位。
      * 本质上，提交者的行为就像工作者（线程），只是他们被限制执行他们提交的本地任务
@@ -541,8 +546,13 @@ public class ForkJoinPool_Comm{
      * Queuing Idle Workers. Unlike HPC work-stealing frameworks, we
      * cannot let workers spin indefinitely scanning for tasks when
      * none can be found immediately, and we cannot start/resume
-     * workers unless there appear to be tasks available.  On the
-     * other hand, we must quickly prod them into action when new
+     * workers unless there appear to be tasks available.
+     *
+     * 正在排队等候空闲工作线程。与HPC窃取工作的框架不同，
+     * 我们不能让工作线程在无法立即找到任务的情况下无限期地扫描任务，
+     * 并且除非出现可用任务，否则我们不能启动/恢复工作线程。
+     * 
+     * On the other hand, we must quickly prod them into action when new
      * tasks are submitted or generated. These latencies are mainly a
      * function of JVM park/unpark (and underlying OS) performance,
      * which can be slow and variable.  In many usages, ramp-up time
@@ -551,13 +561,10 @@ public class ForkJoinPool_Comm{
      * allocation. On the other hand, throughput degrades when too
      * many threads poll for too few tasks.
      *
-     * 正在排队等候空闲工作线程。与HPC窃取工作的框架不同，
-     * 我们不能让工作线程在无法立即找到任务的情况下无限期地扫描任务，
-     * 并且除非出现可用任务，否则我们不能启动/恢复工作线程。
-     * 
      * 另一方面，当提交或生成新任务时，我们必须迅速促使他们采取行动。
      * 这些延迟主要是JVM park/unpark（和底层操作系统）性能的函数，
      * 这可能是缓慢的且可变的。
+     * 
      * 在许多用途中，斜坡上升时间是总体性能的主要限制因素，
      * JIT编译和分配在程序启动时会加剧这种情况。
      * 另一方面，当太多的线程轮询太少的任务时，吞吐量会下降。
@@ -565,22 +572,29 @@ public class ForkJoinPool_Comm{
      * The "ctl" field atomically maintains total and "released"
      * worker counts, plus the head of the available worker queue
      * (actually stack, represented by the lower 32bit subfield of
-     * ctl).  Released workers are those known to be scanning for
+     * ctl).
+     *
+     *  “ctl”字段原子性地维护总的和“释放”工作线程计数，加上可用工作队列的头
+     * （实际上是堆栈，由ctl的低32位子字段表示）。
+     * 
+     * Released workers are those known to be scanning for
      * and/or running tasks. Unreleased ("available") workers are
-     * recorded in the ctl stack. These workers are made available for
-     * signalling by enqueuing in ctl (see method awaitWork).  The
-     * "queue" is a form of Treiber stack. This is ideal for
+     * recorded in the ctl stack.
+     *
+     * 被释放的工作线程是那些已知正在扫描和/或运行任务的工作线程。
+     * 未释放（“可用”）的工作线程在ctl堆栈中记录。
+     * 
+     * These workers are made available for
+     * signalling by enqueuing in ctl (see method awaitWork).
+     *
+     * 这些工作线程可以通过在ctl中排队来发出信号（请参阅awaitWork方法）。
+     *
+     * The "queue" is a form of Treiber stack. This is ideal for
      * activating threads in most-recently used order, and improves
      * performance and locality, outweighing the disadvantages of
      * being prone to contention and inability to release a worker
      * unless it is topmost on stack.
      *
-     * “ctl”字段原子性地维护总的和“释放”工作线程计数，加上可用工作队列的头
-     * （实际上是堆栈，由ctl的低32位子字段表示）。
-     * 被释放的工作线程是那些已知正在扫描和/或运行任务的工作线程。
-     * 未释放（“可用”）的工作线程记录在ctl堆栈中。
-     * 
-     * 这些工作线程可以通过在ctl中排队来发出信号（请参阅awaitWork方法）。
      * “队列”是Treiber堆栈的一种形式。
      * 这非常适合以最近使用的顺序激活线程，并提高了性能和位置，
      * 超过了易发生争用和无法释放工作线程的缺点，除非它位于堆栈的最顶端。
@@ -633,41 +647,47 @@ public class ForkJoinPool_Comm{
      * 因此，我们在初始化时将索引放在那里，并且从不修改这些位。
      *
      * The ctl field also serves as the basis for memory
-     * synchronization surrounding activation. This uses a more
-     * efficient version of a Dekker-like rule that task producers and
-     * consumers sync with each other by both writing/CASing ctl (even
-     * if to its current value).
+     * synchronization surrounding activation.
+     *
+     * ctl字段还充当了围绕激活的内存同步的基础。
+     * 
+     * This uses a more
+     * efficient version of a Dekker-like rule that
+     *
+     * 这使用了一个更高效的类似Dekker的规则版本。
+     * 
+     * task producers and consumers sync with each other
+     * by both writing/CASing ctl (even if to its current value).
      * However, rather than CASing ctl to
      * its current value in the common case where no action is
      * required, we reduce write contention by ensuring that
      * signalWork invocations are prefaced with a full-volatile memory
      * access (which is usually needed anyway).
      *
-     * ctl字段还充当了围绕激活的内存同步的基础。
-     * 这使用了一个更高效的类似Dekker的规则版本。
-     * 任务生产者和消费者通过写入/CASing ctl（即使是其当前值）来相互同步。
+     * 任务生产者和消费者通过writing/CASing ctl（即使是其当前值）来相互同步。
      * 然而，在没有动作的情况下，访问当前值不使用CASing phase方式是需要的
      * signalWork调用以full-volatile内存访问（这通常是需要的）来减少写争用。
      * 
      * Signalling. Signals (in signalWork) cause new or reactivated
      * workers to scan for tasks.
      *
-     * 信号。信号（在signalWork中）使新的或重新激活的工作（线程）扫描scan任务
+     * 信号。信号（在signalWork中）使新的或重新激活的工作（线程），
+     * 这些工作线程扫描并执行任务（scan方法）
      *     
      * Method signalWork and its callers
      * try to approximate the unattainable goal of having the right
      * number of workers activated for the tasks at hand, but must err
      * on the side of too many workers vs too few to avoid stalls.
      *
-     * If computations are purely tree structured, it suffices for every
-     * worker to activate another when it pushes a task into an empty
-     * queue, resulting in O(log(threads)) steps to full activation.
-     *
      * 使用方案
      * 方法signalWork及其调用方试图获取已有（at home）任务而激活正确数量的工作线程
      * 这是一无法实现的目标，
      * 但必须在工作线程过多和过少的情况下做容错，以避免停滞。
-     *
+     * 
+     * If computations are purely tree structured, it suffices for every
+     * worker to activate another when it pushes a task into an empty
+     * queue, resulting in O(log(threads)) steps to full activation.
+     * 
      * 如果计算是纯树结构的，那么当每个工作线程将任务推入空队列queue时，激活另一个就足够了，
      * 从而导致O(log(threads))步完全激活。
      *
@@ -693,7 +713,11 @@ public class ForkJoinPool_Comm{
      * We approximate the second rule by arranging
      * that workers in scan() do not repeat signals when repeatedly
      * taking tasks from any given queue, by remembering the previous
-     * one. There are narrow windows in which both rules may apply,
+     * one.
+     *
+     * 在scan方法中，工作线程复从定队列中获取任务并执行任务，而不用重复发工作信号。
+     * 
+     * There are narrow windows in which both rules may apply,
      * leading to duplicate or unnecessary signals. Despite such
      * limitations, these rules usually avoid slowdowns that otherwise
      * occur when too many workers contend to take too few tasks, or
@@ -701,9 +725,6 @@ public class ForkJoinPool_Comm{
      * contention and overhead effects may still occur during ramp-up,
      * ramp-down, and small computations involving only a few workers.
      *
-     * scan方法中的工作线程通过记录前面的任务（工作线程）在重复从任何给定队列中获取任务时，
-     * 是第二条规则。
-     * 
      * 在狭窄的窗口中，这两种规则都可能适用，从而导致重复或不必要的信号。
      * 尽管有这些限制，但这些规则通常会避免在太多工作线程争着承担太少任务时，
      * 或者在生产商浪费大部分时间辞职时出现的放缓。
@@ -711,18 +732,19 @@ public class ForkJoinPool_Comm{
      * 
      * Scanning. Method scan performs top-level scanning for (and
      * execution of) tasks.  Scans by different workers and/or at
-     * different times are unlikely to poll queues in the same
-     * order. Each scan traverses and tries to poll from each queue in
+     * different times are unlikely to poll queues in the same order.
+     *
+     * 扫描与执行。方法scan扫描执行任务的顶层扫描（和执行）。
+     * 不同工作者（线程）和/或不同时间的扫描不太可能以相同的顺序轮询队列。
+     * Each scan traverses and tries to poll from each queue in
      * a pseudorandom permutation order by starting at a random index,
      * and using a constant cyclically exhaustive stride; restarting
      * upon contention.  (Non-top-level scans; for example in
      * helpJoin, use simpler linear probes because they do not
      * systematically contend with top-level scans.)
      *
-     * 扫描与执行。方法scan扫描执行任务的顶层扫描（和执行）。
-     * 不同工作者（线程）和/或不同时间的扫描不太可能以相同的顺序轮询队列。
-     * 每次扫描从随机索引开始，并使用恒定的循环穷举步幅，以伪随机排列顺序遍历并尝试从每个队列轮询；
-     * 在争用时重新启动。
+     * 每次扫描从随机索引开始，使用恒定的循环穷举步幅，以伪随机排列顺序对每个队列进行遍历并
+     * 尝试执行poll方法，并且在争用时重新启动。
      * （非顶级扫描；例如，在helpJoin中，使用更简单的线性探针，因为它们不会系统地与顶级扫描竞争。）
      * 
      * The pseudorandom generator need not have high-quality statistical properties in
@@ -740,7 +762,7 @@ public class ForkJoinPool_Comm{
      * 我们使用Marsaglia XorShifts，用ThreadLocalRandom探针的Weyl序列接种，这是便宜且足够的。
      * 扫描不会明确考虑核心相关性、负载、缓存位置等。
      * 但是，它们确实会利用时间位置（通常接近这些位置），
-     * 在成功轮询后，在尝试其他轮询之前，更倾向于从同一队列重新轮询（请参阅方法topLevelExec）。
+     * 在成功轮询后，尝试其他轮询之前，更倾向于从同一队列重新轮询（请参阅方法topLevelExec）。
      * 这降低了公平性，而使用一次性poll形式（tryPoll）可能会输给其他工作任务，这在一定程度上抵消了公平性。
      * 
      * Deactivation. Method scan returns a sentinel when no tasks are
@@ -758,8 +780,8 @@ public class ForkJoinPool_Comm{
      * needed.
      *
      * 停用。scan方法扫描在找不到任务时返回一个sentinel，导致停用（请参阅awaitWork）。
-     * ctl中的计数count字段可以准确计算重新激活后任务线程静态状态
-     * （即，当所有工作程序都空闲时）。
+     * ctl中的计数count字段可以准确计算重新激活后任务线程的静态状态
+     * （即，当所有工作线程都空闲时）。
      * 然而，这也可能与新的（外部external）提交竞争，因此还需要重新检查以确定静止。
      * 在明显触发静止后，awaitWork会重新扫描并发出信号（如果它可能错过了信号）。
      * 在其他情况下，丢失的信号可能会暂时降低并行性，因为去激活并不一定意味着没有更多的工作，
@@ -771,7 +793,8 @@ public class ForkJoinPool_Comm{
      * time out and terminate if the pool has remained quiescent for
      * period given by field keepAlive.
      *
-     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的工作线程将超时，
+     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的
+     * 工作线程将超时，
      * 如果池在字段keepAlive给定的时间段内保持静止，则终止。
      * 
      * Shutdown and Termination. A call to shutdownNow invokes
@@ -846,7 +869,8 @@ public class ForkJoinPool_Comm{
      * example helpAsyncBlocker) often avoid or postpone the need for
      * blocking or compensation.
      *
-     * 可用于特定任务类型的其他中间形式（例如helpAsyncBlocker）通常可以避免或推迟阻塞或补偿的需要。
+     * 可用于特定任务类型的其他中间形式（例如helpAsyncBlocker）
+     * 通常可以避免或推迟阻塞或补偿的需要。
      * 
      * The ManagedBlocker extension API can't use helping so relies
      * only on compensation in method awaitBlocker.
@@ -865,7 +889,7 @@ public class ForkJoinPool_Comm{
      * helpJoin中的算法包含一种“线性帮助”形式。
      * 每个工作进程记录（在“源”source字段中）它上次从中窃取任务的队列的id。
      * scan-in方法helpJoin使用这些标记来尝试找到一个工作者（线程）
-     * 来帮助（即，从中偷回任务并执行它），
+     * 来帮助（即，从中盗取任务并执行它），
      * 该工作线程可以加快主动加入任务的完成。
      * 因此，如果要加入的任务没有被窃取，那么加入者将在其自己的本地deque上执行一个任务。
      * 
@@ -888,11 +912,13 @@ public class ForkJoinPool_Comm{
      * tasks to run.
      *
      * 它的不同之处主要在于，我们只记录队列ID，而不是完整的依赖关系链接。
-     * 这需要对队列阵列进行线性扫描以定位窃取工作线程，
-     * 但在需要时隔离成本，而不是增加每个任务的开销。
-     * 此外，搜索仅限于直接和最多两个级别的间接窃取，之后，增加的开销会带来快速递减的回报。
+     * 这需要队列数组的线性扫描以定位盗取（工作）线程。
+     * 但时者需要隔离成本，而不是增加每个任务的开销。
+     * 此外，搜索仅限于直接和最多两个级别的间接窃取，
+     * 之后，增加的开销会带来快速递减的后果。
      * 当暂停延迟记录源时，搜索可能无法定位窃取工作线程。
-     * 此外，即使被准确识别，窃取工作线程也可能永远不会产生一个参与者可以帮助完成的任务。
+     * 此外，即使被准确识别，窃取工作线程也可能永远不会产生一个任务，
+     * 链接者（joiner）可以帮助完成的任务。
      * 因此，在找不到要运行的任务时会尝试进行补偿。
      * 
      * Joining CountedCompleters (see helpComplete) differs from (and
@@ -912,8 +938,8 @@ public class ForkJoinPool_Comm{
      * help; else it blocks under compensation so that it may time out
      * independently of any tasks.
      *
-     * 超时加入（ForkJoinTask timed get）使用了帮助和补偿的受限混合，
-     * 部分原因是池（实际上只有公共池）可能没有任何可用线程：
+     * 超时Joining（ForkJoinTask timed get）使用了帮助和补偿的受限混合，
+     * 部分原因是池（实际上只有公共池）可能没有可用线程：
      * 如果池饱和（所有可用的工作线程都很忙），调用方会尝试删除并以其他方式提供帮助；
      * 否则它会在补偿下阻塞，从而可以独立于任何任务超时。
      * 
@@ -931,7 +957,7 @@ public class ForkJoinPool_Comm{
      * with programming errors and abuse before running out of
      * resources to do so.
      *
-     * 默认情况下，补偿的目的不是在任何给定时间保持未阻塞线程的目标并行数。
+     * 默认情况下，补偿的目的不是在任何给定时间保持未阻塞线程的并行数。
      * 该类的一些早期版本对任何阻塞的联接都采用了即时补偿。
      * 然而，在实践中，绝大多数阻塞都是GC和其他JVM或OS活动的瞬态副产品，
      * 当它们导致长期超额订阅时，替换会使这些活动变得更糟。
