@@ -63,7 +63,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * functionality or initialize threads with different contexts.
      *
      * 用于创建新｛@link ForkJoinWorkerThread｝的工厂。
-     * 必须为扩展基本功能或初始化具有不同上下文的线程的｛@code ForkJoinWorkerThread｝子类定义
+     * 必须为扩展基本功能或初始化具有不同上下文的线程的｛ForkJoinWorkerThread｝子类定义
      * 和使用｛@codeForkJoinworkerThreadFactory｝。
      */
     public static interface ForkJoinWorkerThreadFactory {
@@ -748,7 +748,8 @@ public class ForkJoinPool extends AbstractExecutorService {
     /**
      * Creates a new ForkJoinWorkerThread. This factory is used unless
      * overridden in ForkJoinPool constructors.
-     * 创建一个新的ForkJoinWorkerThread。除非在ForkJoinPool构造函数中重写，否则将使用此工厂
+     * 创建一个新的ForkJoinWorkerThread。除非在ForkJoinPool构造函数中重写，
+     * 否则将使用此工厂
      */
     public static final ForkJoinWorkerThreadFactory
         defaultForkJoinWorkerThreadFactory;
@@ -823,7 +824,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * running out of resources needed to do so.
      *
      * COMMON_MAX_SPARES的默认值。
-     * 可使用“java.util.concurrent.FukJoinPool.common.maximumSpares”系统属性重写。
+     * 可使用“java.util.concurrent.FukJoinPool.common.maximumSpares”
+     * 系统属性重写。
      * 默认值远远超过了正常要求，但也远远低于MAX_CAP和典型的操作系统线程限制，
      * 因此允许JVM在耗尽所需资源之前发现误用/滥用。
      */
@@ -962,7 +964,7 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 如果运行的工作线程太少，则尝试创建或释放工作线程。
      *                                         
      *  this.ctl = ((((long)(-corep) << TC_SHIFT) & TC_MASK) | 
-     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数                                         
+     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数
      */
     final void signalWork() {
         // ctl:	-4222399528566784
@@ -1021,27 +1023,29 @@ public class ForkJoinPool extends AbstractExecutorService {
                 break;             // terminating 正在终止
             }
             else {
-                //SP_MASK  f*8 4294967295
-                //                                11111111111111111111111111111111
-                //UC_MASK: ~SP_MASK f*8 0*8
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SMASK:	65535	n1111111111111111
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                // v是取自当前的ctl值
-                // stackPred 发送信号中的stackPred 在注册任务和等待任务中写入
-                // nc-1
+            //SP_MASK  f*8 4294967295
+            //                                11111111111111111111111111111111
+            //UC_MASK: ~SP_MASK f*8 0*8
+            //1111111111111111111111111111111100000000000000000000000000000000
+            //SMASK:	65535	n1111111111111111
+            //UC_MASK:	-4294967296
+            //1111111111111111111111111111111100000000000000000000000000000000
+            //SP_MASK:	4294967295
+            //                                11111111111111111111111111111111
+            //RC_UNIT:	281474976710656
+            //               1000000000000000000000000000000000000000000000000
+            //TC_UNIT:	4294967296
+            //                               100000000000000000000000000000000
+            // v是取自当前的ctl值
+            // stackPred 发送信号中的stackPred 在注册任务和等待任务中写入
+            // nc-1
+            
                 long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
                 Thread vt = v.owner;
                 if (c == (c = compareAndExchangeCtl(c, nc))) {
                     v.phase = sp;
-                    LockSupport.unpark(vt);  // release idle worker 释放空闲工作者（线程）
+                    //释放空闲工作者（线程）
+                    LockSupport.unpark(vt);  // release idle worker 
                     break;
                 }
             }
@@ -1145,7 +1149,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             w.array = new ForkJoinTask<?>[INITIAL_QUEUE_CAPACITY];
             //stackPred线程哈希值，线程同队列数组的对应关系
             //stackPred;             // pool stack (ctl) predecessor link
-            w.stackPred = seed;            // stash for runWorker runWorker的存储
+            w.stackPred = seed;            // stash for runWorker runWorker
             // INNOCUOUS    = 1 << 18;       // set for Innocuous workers
             if ((modebits & INNOCUOUS) != 0){
                 w.initializeInnocuousWorker();
@@ -1163,8 +1167,8 @@ public class ForkJoinPool extends AbstractExecutorService {
                         id = n | 1;         // resize below 在下面调整大小
                     }
                     // 可发布状态，任务的id值为奇数
-                    // config;                // index, mode, ORed with SRC after init
-                    // volatile phase;        // versioned, negative if inactive
+                    // config;      // index, mode, ORed with SRC after init
+                    // volatile phase; // versioned, negative if inactive
                     
                     // submissionQueue中phase为-1，config为id（线程哈希）
                     // 此外，内部的ID为奇数，外部的ID为偶数，
@@ -1179,7 +1183,8 @@ public class ForkJoinPool extends AbstractExecutorService {
                         WorkQueue[] as = new WorkQueue[an];
                         //主任务在设置seed、phase、config写入id的位置
                         as[id & am] = w;
-                        for (int j = 1; j < n; j += 2){ //奇数为主工作任务，owner不为空
+                        //奇数为主工作任务，owner不为空
+                        for (int j = 1; j < n; j += 2){ 
                             as[j] = qs[j];
                         }
                         // 共享任务队列
@@ -1343,17 +1348,18 @@ public class ForkJoinPool extends AbstractExecutorService {
         w.phase = phase | UNSIGNALLED;       // advance phase 推动阶段
         long prevCtl = ctl, c;               // enqueue 入队
         do {
-            // ctl 默认是主队列容量RC/TC的负值
-            // stackPred更新为ctl，当前任务线程队列信息
+        // ctl 默认是主队列容量RC/TC的负值
+        // stackPred更新为ctl，当前任务线程队列信息
             w.stackPred = (int)prevCtl;
-            //RC_UNIT: 48
-            //1 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
-            //UC_MASK:                       -32
-            //1111111111111111111111111111111100000000000000000000000000000000
-            //SP_MASK                         32
-            //                                11111111111111111111111111111111
-            // 高32位用于计数 phase 用后32位
-            // 更新nc-2
+        
+        //RC_UNIT: 48
+        //1 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+        //UC_MASK:                       -32
+        //1111111111111111111111111111111100000000000000000000000000000000
+        //SP_MASK                         32
+        //                                11111111111111111111111111111111
+        // 高32位用于计数 phase 用后32位
+        // 更新nc-2
             c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK); //c值
             //c值更新
         } while (prevCtl != (prevCtl = compareAndExchangeCtl(prevCtl, c))); 
@@ -1371,16 +1377,16 @@ public class ForkJoinPool extends AbstractExecutorService {
             return -1;
         }
         //SMASK:	65535	H>:	ffff	S-B->:16
-        //                                                   1111 1111 1111 1111
+        //                                       1111 1111 1111 1111
         //p:	16	H>:	10	S-B->:5
-        //                                                                1 0000
+        //                                                    1 0000
         //ac:	-16	H>:	fffffff0	S-B->:32
-        //                               1111 1111 1111 1111 1111 1111 1111 0000
+        //                   1111 1111 1111 1111 1111 1111 1111 0000
         //acSMASK (md & SMASK) :	16	H>:	10	S-B->:5
-        //                                                                1 0000
+        //                                                     1 0000
         else if ((md & SMASK) + ac <= 0) {
             //SHUTDOWN:	16777216	H>:	1000000	S-B->:25
-            //                                   1 0000 0000 0000 0000 0000 0000
+            //                         1 0000 0000 0000 0000 0000 0000
             boolean checkTermination = (md & SHUTDOWN) != 0;
             if ((deadline = System.currentTimeMillis() + keepAlive) == 0L){
                 deadline = 1L;               // avoid zero 避免零
@@ -1515,15 +1521,16 @@ public class ForkJoinPool extends AbstractExecutorService {
                 return -1;                        // retry
             }
             else if (active > minActive) { // reduce parallelism 降低并行性
-            //RC_SHIFT   = 48;
-            //RC_UNIT    = 0x0001L << RC_SHIFT;
-            //RC_MASK    = 0xffffL << RC_SHIFT
-            //RC_UNIT:	281474976710656
-            //               1000000000000000000000000000000000000000000000000
-            //RC_MASK:	-281474976710656
-            //1111111111111111000000000000000000000000000000000000000000000000
-            //~RC_MASK:	281474976710655
-            //                111111111111111111111111111111111111111111111111
+            
+        //RC_SHIFT   = 48;
+        //RC_UNIT    = 0x0001L << RC_SHIFT;
+        //RC_MASK    = 0xffffL << RC_SHIFT
+        //RC_UNIT:	281474976710656
+        //               1000000000000000000000000000000000000000000000000
+        //RC_MASK:	-281474976710656
+        //1111111111111111000000000000000000000000000000000000000000000000
+        //~RC_MASK:	281474976710655
+        //                111111111111111111111111111111111111111111111111
                 
             //nc:	-16	H>:	ffefffc000000000	S-B->:64
             //1111 1111 1110 1111 1111 1111 1100 0000
@@ -1597,7 +1604,8 @@ public class ForkJoinPool extends AbstractExecutorService {
                                 int nextBase = b + 1, src = j | SRC, sx;
                                 ForkJoinTask<?> t = WorkQueue.getSlot(a, k);
                                 boolean eligible = sq == wid ||
-                                    ((x = qs[sq & m]) != null &&   // indirect 间接的
+                                    // 间接的
+                                    ((x = qs[sq & m]) != null &&   // indirect 
                                      //SMASK        = 0xffff;
                                      //SMASK:	65535	1111111111111111
                                      ((sx = (x.source & SMASK)) == wid ||
@@ -1945,31 +1953,31 @@ public class ForkJoinPool extends AbstractExecutorService {
             // 除非自发信号，否则递减计数
             // unless self-signalled, decrement counts
             if ((cfg & QUIET) == 0){ 
-                // RC_SHIFT   = 48;
-                // RC_UNIT    = 0x0001L << RC_SHIFT;
-                // RC_MASK    = 0xffffL << RC_SHIFT;
+            // RC_SHIFT   = 48;
+            // RC_UNIT    = 0x0001L << RC_SHIFT;
+            // RC_MASK    = 0xffffL << RC_SHIFT;
                 
-                // TC_SHIFT   = 32;
-                // TC_UNIT    = 0x0001L << TC_SHIFT;
-                // TC_MASK    = 0xffffL << TC_SHIFT;
+            // TC_SHIFT   = 32;
+            // TC_UNIT    = 0x0001L << TC_SHIFT;
+            // TC_MASK    = 0xffffL << TC_SHIFT;
                 
-                // SP_MASK    = 0xffffffffL;
+            // SP_MASK    = 0xffffffffL;
                 
-                //TC_MASK:	281470681743360
-                //                111111111111111100000000000000000000000000000000
-                //RC_MASK:	-281474976710656
-                //1111111111111111000000000000000000000000000000000000000000000000
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
+            //TC_MASK:	281470681743360
+            //                111111111111111100000000000000000000000000000000
+            //RC_MASK:	-281474976710656
+            //1111111111111111000000000000000000000000000000000000000000000000
+            //UC_MASK:	-4294967296
+            //1111111111111111111111111111111100000000000000000000000000000000
                 
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                // 减小ctl值
-                // RC/TC/SP 更新3
+            //SP_MASK:	4294967295
+            //                                11111111111111111111111111111111
+            //RC_UNIT:	281474976710656
+            //               1000000000000000000000000000000000000000000000000
+            //TC_UNIT:	4294967296
+            //                               100000000000000000000000000000000
+            // 减小ctl值
+            // RC/TC/SP 更新3
                 do {} while (c != (c = compareAndExchangeCtl(
                                        c, ((RC_MASK & (c - RC_UNIT)) |
                                            (TC_MASK & (c - TC_UNIT)) |
