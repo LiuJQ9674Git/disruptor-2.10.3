@@ -1222,8 +1222,13 @@ public class ForkJoinPool extends AbstractExecutorService {
             // 在队列中 config 在写入SRC
             w.config |= SRC;                    // mark as valid source 标记为有效源
             //使用registerWorker中的种子，线程哈希值
+            
+            // seed:	19	H>:	13	S-B->:5
+            // 1 0011
             int r = w.stackPred, src = 0;       // use seed from registerWorker 
             do {
+                // r:	5136978	H>:	4e6252	S-B->:23
+                // 100 1110 0110 0010 0101 0010
                 r ^= r << 13; r ^= r >>> 17; r ^= r << 5; // xorshift
                 // 线程探针哈希值，做随机变化之后，在主任务中查找并执行任务队列中的认证
                 // r为主任务队列位置
@@ -1232,6 +1237,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         }
     }
 
+    
     /**
      * Scans for and if found executes top-level tasks: Tries to poll
      * each queue starting at a random index with random stride,
@@ -1251,12 +1257,25 @@ public class ForkJoinPool extends AbstractExecutorService {
     private int scan(WorkQueue w, int prevSrc, int r) {
         WorkQueue[] qs = queues;
         int n = (w == null || qs == null) ? 0 : qs.length;
-        // r为主队列，step为奇数，
+        /**
+         * r:	4055535	H>:	3de1ef	S-B->:22
+         *             11 1101 1110 0001 1110 1111
+         * step:	61	H>:	3d	S-B->:6
+         *                                 11 1101
+         *
+         *
+         **/
+        // r:	5136978	H>:	4e6252	S-B->:23
+        
+        // 100 1110 0110 0010 0101 0010
+        // step:	79	H>:	4f	S-B->:7
+        // 100 1111
         for (int step = (r >>> 16) | 1, i = n; i > 0; --i, r += step) {
             int j, cap, b; WorkQueue q; ForkJoinTask<?>[] a;
             // 
             if ((q = qs[j = r & (n - 1)]) != null && // poll at qs[j].array[k]
-                (a = q.array) != null && (cap = a.length) > 0) { //a 为为主任务队列r位置任务
+                //a 为为主任务队列r位置任务
+                (a = q.array) != null && (cap = a.length) > 0) { 
                 // k为子任务（WorkQueue.array）中的位置，底部base任务
                 int k = (cap - 1) & (b = q.base), nextBase = b + 1;
                 // nextIndex下一个底部开始子任务（WorkQueue.array）中的位置
