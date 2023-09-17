@@ -621,7 +621,7 @@ public class ForkJoinPool_Comm{
      * workers. If exceptional, the exception is propagated, generally
      * to some external caller.
      *
-     * 创造工作（线程）。为了创建一个worker，我们预先增加计数（用作保留），
+     * 创造工作（线程）。为了创建一个工作线程（worker（，我们预先增加计数（用作保留），
      * 并尝试通过其工厂构建ForkJoinWorkerThread。
      * 启动时，新线程首先调用registerWorker，在那里它构造一个WorkQueue，
      * 并在queues数组中分配一个索引（如有必要，扩展数组）。
@@ -679,7 +679,6 @@ public class ForkJoinPool_Comm{
      * number of workers activated for the tasks at hand, but must err
      * on the side of too many workers vs too few to avoid stalls.
      *
-     * 使用方案
      * 方法signalWork及其调用方试图获取已有（at home）任务而激活正确数量的工作线程
      * 这是一无法实现的目标，
      * 但必须在工作线程过多和过少的情况下做容错，以避免停滞。
@@ -702,8 +701,8 @@ public class ForkJoinPool_Comm{
      * Because we don't know about usage patterns (or most commonly, mixtures),
      * we use both approaches.
      *
-     * 如果任务仅从单个生产者串行进入，则每个从队列中获取其第一个（自上次静止以来）
-     * 任务的工作线程应在该队列中有更多任务时向另一个发出信号。
+     * 如果任务仅从单个生产者串行进入，则每个工作线程从队列中获取其第一个（自上次不活跃park以来）
+     * 任务工作线程应在该队列中有更多任务时向发送信号到另一个工作线程。
      * 这相当于，但通常比安排窃取线程者执行两项任务更快，
      * 在其自己的队列中重新推送一项任务，并发出信号（因为其队列是空的），
      * 这也导致对数完全激活时间。
@@ -715,7 +714,7 @@ public class ForkJoinPool_Comm{
      * taking tasks from any given queue, by remembering the previous
      * one.
      *
-     * 在scan方法中，工作线程复从定队列中获取任务并执行任务，而不用重复发工作信号。
+     * 在scan方法中，工作线程从队列中获取任务并执行任务，而不用重复发工作信号。
      * 
      * There are narrow windows in which both rules may apply,
      * leading to duplicate or unnecessary signals. Despite such
@@ -763,7 +762,8 @@ public class ForkJoinPool_Comm{
      * 扫描不会明确考虑核心相关性、负载、缓存位置等。
      * 但是，它们确实会利用时间位置（通常接近这些位置），
      * 在成功轮询后，尝试其他轮询之前，更倾向于从同一队列重新轮询（请参阅方法topLevelExec）。
-     * 这降低了公平性，而使用一次性poll形式（tryPoll）可能会输给其他工作任务，这在一定程度上抵消了公平性。
+     * 这降低了公平性，而使用一次性poll形式（tryPoll）可能会输给其他工作任务，
+     * 这在一定程度上抵消了公平性。
      * 
      * Deactivation. Method scan returns a sentinel when no tasks are
      * found, leading to deactivation (see awaitWork). The count
@@ -780,12 +780,13 @@ public class ForkJoinPool_Comm{
      * needed.
      *
      * 停用。scan方法扫描在找不到任务时返回一个sentinel，导致停用（请参阅awaitWork）。
-     * ctl中的计数count字段可以准确计算重新激活后任务线程的静态状态
+     * ctl中的计数count字段可以准确计算终止（不活跃park）后任务线程的静态状态
      * （即，当所有工作线程都空闲时）。
      * 然而，这也可能与新的（外部external）提交竞争，因此还需要重新检查以确定静止。
      * 在明显触发静止后，awaitWork会重新扫描并发出信号（如果它可能错过了信号）。
-     * 在其他情况下，丢失的信号可能会暂时降低并行性，因为去激活并不一定意味着没有更多的工作，
-     * 只是意味着没有其他工作者（线程）没有完成的任务。
+     * 在其他情况下，丢失的信号可能会暂时降低并行性，
+     * 因为停用（park）并不一定意味着没有更多的工作，
+     * 只是意味着其他工作者（线程）不能从这个无任务的队列获取任务。
      * 但如果需要的话，会产生更多的信号（见上文）最终重新激活。
      * 
      * Trimming workers. To release resources after periods of lack of
@@ -793,23 +794,27 @@ public class ForkJoinPool_Comm{
      * time out and terminate if the pool has remained quiescent for
      * period given by field keepAlive.
      *
-     * 维护工作者（线程）。要在缺乏使用的时间段后释放资源，当池处于静止状态时开始等待的
-     * 工作线程将超时，
-     * 如果池在字段keepAlive给定的时间段内保持静止，则终止。
+     * 维护工作者（线程）。要在缺乏（没有）使用的时间段后释放资源，
+     * 在池处于不活跃状态时，线程开始等待，
+     * 如果池在字段keepAlive给定的时间段内保持不活跃，
+     * 之后工作下半场则超时、终止
      * 
      * Shutdown and Termination. A call to shutdownNow invokes
      * tryTerminate to atomically set a mode bit. The calling thread,
      * as well as every other worker thereafter terminating, helps
      * terminate others by cancelling their unprocessed tasks, and
-     * waking them up. Calls to non-abrupt shutdown() preface this by
+     * waking them up.
+     *
+     * 关闭和终止。对shutdownow的调用调用tryTerminate以原子方式设置模式位。
+     * 调用线程以及此后终止的每个其他工作线程，通过取消工作线程未处理的任务并
+     * 唤醒他们来帮助终止他们。
+     * Calls to non-abrupt shutdown() preface this by
      * checking isQuiescent before triggering the "STOP" phase of
      * termination. To conform to ExecutorService invoke, invokeAll,
      * and invokeAny specs, we must track pool status while waiting,
      * and interrupt interruptible callers on termination (see
      * ForkJoinTask.joinForPoolInvoke etc).
      *
-     * 关闭和终止。对shutdownow的调用调用tryTerminate以原子方式设置模式位。
-     * 调用线程以及此后终止的每个其他工作线程，通过取消其他人未处理的任务并唤醒他们来帮助终止他们。
      * 调用非突然关闭shutdown()，在触发终止的“STOP”阶段之前检查isQuietent。
      * 为了符合ExecutorService invoke、invokeAll和invokeAny规范，
      * 我们必须在等待时跟踪池状态，并在终止时中断可中断的调用方

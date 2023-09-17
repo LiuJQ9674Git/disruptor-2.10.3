@@ -2447,6 +2447,100 @@ public class ForkJoinPool extends AbstractExecutorService {
         return (int)POOLIDS.getAndAdd(x);
     }
 
+    // signal
+    /*
+     * Tries to create or release a worker if too few are running.
+     * 如果运行的工作线程太少，则尝试创建或释放工作线程。
+     * ctl:	-4222399528566784
+     *1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
+     *
+     *TC_MASK:	281470681743360  0xffffL<<32 低32为0
+     *                    1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
+     *RC_MASK:	-281474976710656 0xff ffL>>48
+     *1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+     *
+     *UNSIGNALLED:	-2147483648	Bit->:1 << 31 取负数（取反）和TC_MASK差一位，即32为1
+     *1111 1111 1111 1111 1111 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
+     *~UNSIGNALLED:	2147483647	               32位为0
+     *                                         111 1111 1111 1111 1111 1111 1111 1111
+     *                                         
+     *  this.ctl = ((((long)(-corep) << TC_SHIFT) & TC_MASK) | //核数（线程数、工作者数）
+     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数                                         
+     */
+    final void signalWork() {
+        // ctl:	-4222399528566784
+        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
+        for (long c = ctl; c < 0L;) {
+            int sp, i; WorkQueue[] qs; WorkQueue v;
+            // 没有闲着的工作者（线程）
+            //~UNSIGNALLED
+            //                                 1111111111111111111111111111111
+            //UNSIGNALLED
+            //1111111111111111111111111111111110000000000000000000000000000000
+            if ((sp = (int)c & ~UNSIGNALLED) == 0) {// no idle workers
+                // 足够的工作者（线程）总数 1<<47
+                if ((c & ADD_WORKER) == 0L){ // enough total workers 
+                    break;
+                }
+                //int  RC_SHIFT   = 48;
+                //long RC_UNIT    = 0x0001L << RC_SHIFT;
+                //long RC_MASK    = 0xffffL << RC_SHIFT
+                
+                //
+                /int  TC_SHIFT   = 32;
+                //long TC_UNIT    = 0x0001L << TC_SHIFT;
+                //long TC_MASK    = 0xffffL << TC_SHIFT;
+                
+            //RC_MASK
+            //1111111111111111000000000000000000000000000000000000000000000000
+            //TC_MASK
+            //                111111111111111100000000000000000000000000000000
+            //RC_UNIT:	281474976710656
+            //               1000000000000000000000000000000000000000000000000
+            //TC_UNIT:	4294967296
+            //                               100000000000000000000000000000000
+                if (c == (c = compareAndExchangeCtl(
+                              c, ((RC_MASK & (c + RC_UNIT)) | //
+                                  (TC_MASK & (c + TC_UNIT)))))) {
+                    createWorker();
+                    break;
+                }
+            }
+            else if ((qs = queues) == null){
+                break;               // unstarted/terminated 未启动/已终止
+            }
+            //SMASK:	65535	Bit->:1111 1111 1111 1111
+            else if (qs.length <= (i = sp & SMASK)){ //= 0xff ff ff ffL(1111)
+                break;              // terminated 已终止
+            }
+            else if ((v = qs[i]) == null){
+                break;             // terminating 正在终止
+            }
+            else {
+            //SP_MASK  f*8 4294967295
+            //                                11111111111111111111111111111111
+            //UC_MASK: ~SP_MASK f*8 0*8
+            //1111111111111111111111111111111100000000000000000000000000000000
+            //SMASK:	65535	n1111111111111111
+            //UC_MASK:	-4294967296
+            //1111111111111111111111111111111100000000000000000000000000000000
+            //SP_MASK:	4294967295
+            //                                11111111111111111111111111111111
+            //RC_UNIT:	281474976710656
+            //1000000000000000000000000000000000000000000000000
+            //TC_UNIT:	4294967296
+            //100000000000000000000000000000000
+                long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
+                Thread vt = v.owner;
+                if (c == (c = compareAndExchangeCtl(c, nc))) {
+                    v.phase = sp;
+                    LockSupport.unpark(vt);  // release idle worker 释放空闲工作者（线程）
+                    break;
+                }
+            }
+        }
+    }
+    
     // Creating, registering and deregistering workers 创建、注册和注销工作者（线程）
 
     /**
@@ -2794,100 +2888,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         return 0;
     }
 
-    
-    /*
-     * Tries to create or release a worker if too few are running.
-     * 如果运行的工作线程太少，则尝试创建或释放工作线程。
-     * ctl:	-4222399528566784
-     *1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
-     *
-     *TC_MASK:	281470681743360  0xffffL<<32 低32为0
-     *                    1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000
-     *RC_MASK:	-281474976710656 0xff ffL>>48
-     *1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
-     *
-     *UNSIGNALLED:	-2147483648	Bit->:1 << 31 取负数（取反）和TC_MASK差一位，即32为1
-     *1111 1111 1111 1111 1111 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000
-     *~UNSIGNALLED:	2147483647	               32位为0
-     *                                         111 1111 1111 1111 1111 1111 1111 1111
-     *                                         
-     *  this.ctl = ((((long)(-corep) << TC_SHIFT) & TC_MASK) | //核数（线程数、工作者数）
-     *               (((long)(-p)     << RC_SHIFT) & RC_MASK)); //并发数                                         
-     */
-    final void signalWork() {
-        // ctl:	-4222399528566784
-        // ctl->:1111111111110000111111111100000000000000000000000000000000000000
-        for (long c = ctl; c < 0L;) {
-            int sp, i; WorkQueue[] qs; WorkQueue v;
-            // 没有闲着的工作者（线程）
-            //~UNSIGNALLED
-            //                                 1111111111111111111111111111111
-            //UNSIGNALLED
-            //1111111111111111111111111111111110000000000000000000000000000000
-            if ((sp = (int)c & ~UNSIGNALLED) == 0) {// no idle workers
-                // 足够的工作者（线程）总数 1<<47
-                if ((c & ADD_WORKER) == 0L){ // enough total workers 
-                    break;
-                }
-                //int  RC_SHIFT   = 48;
-                //long RC_UNIT    = 0x0001L << RC_SHIFT;
-                //long RC_MASK    = 0xffffL << RC_SHIFT
-                
-                //
-                /int  TC_SHIFT   = 32;
-                //long TC_UNIT    = 0x0001L << TC_SHIFT;
-                //long TC_MASK    = 0xffffL << TC_SHIFT;
-                
-                //RC_MASK
-                //1111111111111111000000000000000000000000000000000000000000000000
-                //TC_MASK
-                //                111111111111111100000000000000000000000000000000
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                if (c == (c = compareAndExchangeCtl(
-                              c, ((RC_MASK & (c + RC_UNIT)) | //
-                                  (TC_MASK & (c + TC_UNIT)))))) {
-                    createWorker();
-                    break;
-                }
-            }
-            else if ((qs = queues) == null){
-                break;               // unstarted/terminated 未启动/已终止
-            }
-            //SMASK:	65535	Bit->:1111 1111 1111 1111
-            else if (qs.length <= (i = sp & SMASK)){ //= 0xff ff ff ffL(1111)
-                break;              // terminated 已终止
-            }
-            else if ((v = qs[i]) == null){
-                break;             // terminating 正在终止
-            }
-            else {
-                //SP_MASK  f*8 4294967295
-                //                                11111111111111111111111111111111
-                //UC_MASK: ~SP_MASK f*8 0*8
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SMASK:	65535	n1111111111111111
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //100000000000000000000000000000000
-                long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
-                Thread vt = v.owner;
-                if (c == (c = compareAndExchangeCtl(c, nc))) {
-                    v.phase = sp;
-                    LockSupport.unpark(vt);  // release idle worker 释放空闲工作者（线程）
-                    break;
-                }
-            }
-        }
-    }
-    
+  
     /**
      * Final callback from terminating worker, as well as upon failure
      * to construct or start a worker.  Removes record of worker from
@@ -2932,20 +2933,20 @@ public class ForkJoinPool extends AbstractExecutorService {
                 
                 // SP_MASK    = 0xffffffffL;
                 
-                //TC_MASK:	281470681743360
-                //                111111111111111100000000000000000000000000000000
-                //RC_MASK:	-281474976710656
-                //1111111111111111000000000000000000000000000000000000000000000000
-                //UC_MASK:	-4294967296
-                //1111111111111111111111111111111100000000000000000000000000000000
+            //TC_MASK:	281470681743360
+            //                111111111111111100000000000000000000000000000000
+            //RC_MASK:	-281474976710656
+            //1111111111111111000000000000000000000000000000000000000000000000
+            //UC_MASK:	-4294967296
+            //1111111111111111111111111111111100000000000000000000000000000000
                 
-                //SP_MASK:	4294967295
-                //                                11111111111111111111111111111111
-                //RC_UNIT:	281474976710656
-                //               1000000000000000000000000000000000000000000000000
-                //TC_UNIT:	4294967296
-                //                               100000000000000000000000000000000
-                // 减小ctl值
+            //SP_MASK:	4294967295
+            //                                11111111111111111111111111111111
+            //RC_UNIT:	281474976710656
+            //               1000000000000000000000000000000000000000000000000
+            //TC_UNIT:	4294967296
+            //                               100000000000000000000000000000000
+            // 减小ctl值(ctl为负值)
                 do {} while (c != (c = compareAndExchangeCtl(
                                        c, ((RC_MASK & (c - RC_UNIT)) |
                                            (TC_MASK & (c - TC_UNIT)) |
@@ -2953,10 +2954,11 @@ public class ForkJoinPool extends AbstractExecutorService {
             }
             else if ((int)c == 0){  // was dropped on timeout 超时时被丢弃
                 //抑制信号（如果是最后）
-                cfg = 0;                             // suppress signal if last 
+                cfg = 0;                      // suppress signal if last 
             }
             for (ForkJoinTask<?> t; (t = w.pop()) != null; ){
-                ForkJoinTask.cancelIgnoringExceptions(t); // cancel tasks 取消任务
+                // 取消任务
+                ForkJoinTask.cancelIgnoringExceptions(t); // cancel tasks 
             }
         } //
         //SRC          = 1 << 17;       // set for valid queue ids
@@ -2974,7 +2976,8 @@ public class ForkJoinPool extends AbstractExecutorService {
      * 如果可以在启用或已终止时开始终止，则返回true
      */
     final boolean canStop() {
-        outer: for (long oldSum = 0L;;) { // repeat until stable 重复直到稳定
+        // 重复直到稳定
+        outer: for (long oldSum = 0L;;) { // repeat until stable 
             int md; WorkQueue[] qs;  long c;
             // STOP         = 1 << 31;
             if ((qs = queues) == null || ((md = mode) & STOP) != 0){
@@ -2990,7 +2993,8 @@ public class ForkJoinPool extends AbstractExecutorService {
                 break;
             }
             long checkSum = c;
-            for (int i = 1; i < qs.length; i += 2) { // scan submitters 扫描提交者
+            // 扫描提交者 F-J-Task-Thread
+            for (int i = 1; i < qs.length; i += 2) { // scan submitters 
                 WorkQueue q; ForkJoinTask<?>[] a; int s = 0, cap;
                 //
                 if ((q = qs[i]) != null && (a = q.array) != null &&
@@ -3016,8 +3020,9 @@ public class ForkJoinPool extends AbstractExecutorService {
      * that the caller doesn't need to re-adjust counts when later
      * unblocked.
      *
-     * 尝试递减计数（有时是隐式的），并可能安排一名补偿工作者（线程）为阻塞做准备。可能由于干扰而失败，
-     * 在这种情况下返回-1，因此调用者可以重试。零返回值表示调用方在以后取消阻止时不需要重新调整计数。
+     * 尝试递减计数（有时是隐式的），并可能安排一名补偿工作者（线程）为阻塞做准备。
+     * 可能由于干扰而失败，在这种情况下返回-1，因此调用者可以重试。
+     * 零返回值表示调用方在以后取消阻止时不需要重新调整计数。
      *
      * @param c incoming ctl value 传入ctl值
      * @return UNCOMPENSATE: block then adjust, 0: block, -1 : retry
@@ -3037,7 +3042,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             total     = (short)(c >>> TC_SHIFT), // TC_SHIFT   = 32;
             sp        = (int)c & ~UNSIGNALLED;   // UNSIGNALLED  = 1 << 31; 
         if ((md & SMASK) == 0)
-            return 0;                  // cannot compensate if parallelism zero
+            return 0;            // cannot compensate if parallelism zero
         else if (total >= 0) {
             if (sp != 0) {                        // activate idle worker
                 WorkQueue[] qs; int n; WorkQueue v;
@@ -3047,9 +3052,9 @@ public class ForkJoinPool extends AbstractExecutorService {
                     //SP_MASK    = 0xffffffffL;
                     //UC_MASK    = ~SP_MASK;
                     //SP_MASK:	4294967295
-                    //                               11111111111111111111111111111111
-                    //UC_MASK:	-4294967296
-                    //1111111111111111111111111111111100000000000000000000000000000000
+          //                               11111111111111111111111111111111
+          //UC_MASK:	-4294967296
+          //1111111111111111111111111111111100000000000000000000000000000000
                     long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
                     if (compareAndSetCtl(c, nc)) {
                         v.phase = sp;
