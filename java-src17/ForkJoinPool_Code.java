@@ -1308,24 +1308,7 @@ public class ForkJoinPool extends AbstractExecutorService {
         // 可能调整了大小
         return (queues != qs) ? prevSrc: -1;// possibly resized
     }
-
-/*
-ctl:	-4222399528566784	H>:	fff0ffc000000000	S-B->:64
-  16   15  14   13   12   11   10   9    8    7     6    5    4    3    2   1
- 1111 1111 1111 0000 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
-
-size:	32	   H>:	20	S-B->:6
-                                                                         10 0000
-seed:	14	         H>:	e	S-B->:4
-                                                                            1110
-phase+:	65550	     H>:	1000e	S-B->:17
-                                                           1 0000 0000 0000 1110
-phase-:	-2147418098	 H>:	8001000e	S-B->:32
-                                         1000 0000 0000 0001 0000 0000 0000 1110
-
-nc:	-4503874505277440	H>:	ffefffc000000000	S-B->:64
- 1111 1111 1110 1111 1111 1111 1100 0000 0000 0000 0000 0000 0000 0000 0000 0000
- */    
+  
     /**
      * Advances worker phase, pushes onto ctl stack, and awaits signal
      * or reports termination.
