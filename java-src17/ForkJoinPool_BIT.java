@@ -133,6 +133,138 @@ Bit-Size->:	32			Hex-Size->:8
 **/
                    
 
+/**
+ * 运行栈
+ * 1.registerWorker
+ this = {ForkJoinPool@768} "java.util.concurrent.ForkJoinPool@681a9515[Running,
+ parallelism = 8, size = 1, active = 1, running = 1,
+    steals = 0, tasks = 0, submissions = 1]"
+ keepAlive = 60000
+ stealCount = 0
+ scanRover = 0
+ threadIds = 1
+ bounds = 2146959353
+ mode = 8
+ queues = {ForkJoinPool$WorkQueue[16]@776}
+ 
+  2 = {ForkJoinPool$WorkQueue@790} 
+   phase = -1
+   stackPred = 0
+   config = 1013904242
+   base = 0
+   array = {ForkJoinTask[256]@791} 
+   owner = null
+   top = 1
+   source = 0
+   nsteals = 0
+  5 = {ForkJoinPool$WorkQueue@809} 
+   phase = 5
+   stackPred = 1013904242
+   config = 5
+   base = 0
+   array = {ForkJoinTask[256]@841} 
+   owner = {ForkJoinWorkerThread@801} "Thread[ForkJoinPool-1-worker-1,5,main]"
+   top = 0
+   source = 0
+   nsteals = 0
+   
+ registrationLock = {ReentrantLock@777} "
+ java.util.concurrent.locks.ReentrantLock@3af49f1c[Locked by thread ForkJoinPool-1-worker-1]"
+ termination = null
+ workerNamePrefix = "ForkJoinPool-1-worker-"
+ factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@779} 
+ ueh = null
+ saturate = null
+ ctl = -1688879925035008
+w = {ForkJoinPool$WorkQueue@809} 
+lock = {ReentrantLock@777} "
+java.util.concurrent.locks.ReentrantLock@3af49f1c[Locked by thread ForkJoinPool-1-worker-1]"
+
+seed = 1013904242
+modebits = 0
+id = 5
+queues = {ForkJoinPool$WorkQueue[16]@776} 
+ *
+ *2. runWorker
+ w = {ForkJoinPool$WorkQueue@809} 
+ phase = 5
+ stackPred = 1013904242
+ config = 131077
+ base = 0
+ array = {ForkJoinTask[256]@841} 
+ owner = {ForkJoinWorkerThread@801} "Thread[ForkJoinPool-1-worker-1,5,main]"
+ top = 0
+ source = 0
+ nsteals = 0
+ *
+ *
+ *3.scan
+ *
+ w = {ForkJoinPool$WorkQueue@809} 
+ phase = 5
+ stackPred = 1013904242
+ config = 131077
+ base = 0
+ array = {ForkJoinTask[256]@841} 
+ owner = {ForkJoinWorkerThread@801} "Thread[ForkJoinPool-1-worker-1,5,main]"
+ top = 0
+ source = 131074
+ nsteals = 0
+ 
+ 3.2.scan-2
+ r:-1068750243
+ 
+ *4.awaitWork
+ *
+ *
+ *ctl:-1688879925035008
+ *c:  -1970354901680123
+ *ac: -8
+ *
+ *n:16
+ *
+ *w.phase:-2147418107
+ *
+ *
+ *pool = {ForkJoinPool@765} "java.util.concurrent.ForkJoinPool@3af49f1c[
+ *Running, parallelism = 8, size = 1, active = 1, running = 1, steals = 0, tasks = 0, submissions = 0]"
+ keepAlive = 60000
+ stealCount = 0
+ scanRover = 0
+ threadIds = 1
+ bounds = 2146959353
+ mode = 8
+ queues = {ForkJoinPool$WorkQueue[16]@767} 
+  2 = {ForkJoinPool$WorkQueue@794} 
+   phase = -1
+   stackPred = 0
+   config = 1013904242
+   base = 1
+   array = {ForkJoinTask[256]@795} 
+   owner = null
+   top = 1
+   source = 0
+   nsteals = 0
+  5 = {ForkJoinPool$WorkQueue@807} 
+   phase = 5
+   stackPred = 1013904242
+   config = 131077
+   base = 0
+   array = {ForkJoinTask[256]@834} 
+   owner = {ForkJoinWorkerThread@808} "Thread[ForkJoinPool-1-worker-1,5,main]"
+   top = 0
+   source = 131074
+   nsteals = 0
+ registrationLock = {ReentrantLock@766}
+ "java.util.concurrent.locks.ReentrantLock@5b2133b1[Unlocked]"
+ termination = null
+ workerNamePrefix = "ForkJoinPool-1-worker-"
+ factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@762} 
+ ueh = null
+ saturate = null
+ ctl = -1688879925035008
+ 
+ **/
  
   public class FoolJoinPool_Bit{   
 
