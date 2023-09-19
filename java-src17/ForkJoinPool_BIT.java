@@ -1,6 +1,102 @@
+// FoolJoinPool
+public class FoolJoinPool_Bit{  
+
+/**
+     *  状态信息写入顺序 w:写 r：读  非w任务操作: q
+     *  
+     *                       |stackPred|config |phase |source  | base
+     *                       --------------------------------- |-------  
+     *      new ForkJoinPool |         |   w  |       |        |
+     *      -------------------------------------------------- |------
+     *      new WorkQueue    |         |   w  |       |        |
+     *      -------------------------------------------------- |------
+     *      submissionQueue  |         |      |       |        |
+     *      -------------------------------------------------- |------
+     *       signalWork      |    v.r  |      |   w   |        |
+     *      ---------------------------------------------------|------
+     *      registerWorker   |    w    |  w/r |       |        |
+     *      ---------------------------------------------------|------
+     *      runWorker        |    r    |   w  |       | |
+     *      ---------------------------------------------------|------
+     *      scan             |         |      |       |   w    | q.r
+     *      ---------------------------------------------------|------
+     *      awaitWork        |    w    |  w/r |   r   | r q.r  | q.r
+     *      ---------------------------------------------------|------
+     *      helpJoin         |         |   r  |       | w/r q.r| q.r
+     *      ---------------------------------------------------|------
+     *      tryCompensate    |    r    |      |   w   |        | 
+     *      ---------------------------------------------------|------
+     *      helpComplete     |         |   r  |       |        |q.r
+     *      ---------------------------------------------------|-----
+     *
+     *      invoke -> submissionQueue-> new WorkQueue -> signalWork
+     *      fork ->              push                  -> signalWork
+     *      registerWorker-> runWorker       -> scan   -> signalWork
+     *                                                 -> awaitWork
+     *      ForkJoinTask invoke/join/get     -> awaitDone            
+     *                                                 -> helpJoin
+     *                                                 -> helpComplete
+     *      signalWork
+     *          v.phase = sp;
+     *
+     *      base：
+     *          setBaseOpaque
+     *              helpComplete(ForkJoinTask<?>, WorkQueue, boolean)
+     *              pollScan(boolean)
+     *              
+     *          scan
+     *              b = q.base
+     *              
+     *          helpJoin
+     *              q.base != b
+     *              
+     *          ForkJoinPool.WorkQueue
+     *              tryPoll()
+     *              nextLocalTask(int)
+     *              helpAsyncBlocker(ManagedBlocker)
+     *              
+     *     // signalWork
+     *     //long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
+     *
+     *     // awaitWork
+     *    //c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
+     *
+     *    //tryCompensate
+     *    //long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
+     *
+     *    // long nc = ((RC_MASK & (c - RC_UNIT)) | (~RC_MASK & c));
+     *    // long nc = ((c + TC_UNIT) & TC_MASK) | (c & ~TC_MASK);
+     *
+     *    awaitWork
+     *       compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
+     *         //11111 1111 1111 1111 111 1111 1111 1111
+     *         (prevCtl & SP_MASK)))) {
+     *
+     *   // RC/TC 计数处1
+     *    if (c == (c = compareAndExchangeCtl(
+     *       c, ((RC_MASK & (c + RC_UNIT)) | // RC增加
+     *       (TC_MASK & (c + TC_UNIT)))))) { // TC增加      
+**/
+
+/**
+ *ctl:	-1970359196712960	H>:	fff8fff800000000	S-B->:64
+ *1111 1111 1111 1000 1111 1111 1111 1000 0000 0000 0000 0000 0000 0000 0000 0000
+ *ictl:	0	H>:	0	S-B->:1
+ *                                                                              0
+ *sp:	2147483647	H>:	7fffffff	S-B->:31
+ *                                         111 1111 1111 1111 1111 1111 1111 1111
+ *c:	-1407400653357056	H>:	fffafffa00000000	S-B->:64
+ *1111 1111 1111 1010 1111 1111 1111 1010 0000 0000 0000 0000 0000 0000 0000 0000
+ *ic:	-1407400653357056	H>:	0	S-B->:1
+ *0
+ *cc:	-281474976710656	H>:	ffff000000000000	S-B->:64
+ *1111 1111 1111 1111 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+ *icc:	-281474976710656	H>:	0	S-B->:1
+ *0
+ **/
+
 /**
  * ForkJoinPool Bit Operation
- *
 FIFO:	65536	H>:	10000	S-B->:17
                                                             1 0000 0000 0000 0000
 SRC:	131072	H>:	20000	S-B->:18
@@ -96,9 +192,9 @@ ac:	-17	H>:	ffffffef	S-B->:32
                                           1111 1111 1111 1111 1111 1111 1110 1111
 nc:	-4785347334438885	H>:	ffeeffc08001001b	S-B->:64
 	 nc = ((RC_MASK & (ctl - RC_UNIT)) | (~RC_MASK & ctl)); 
- 1111 1111 1110 1110 1111 1111 1100 0000 1000 0000 0000 0001 0000 0000 0001 1011
+  1111 1111 1110 1110 1111 1111 1100 0000 1000 0000 0000 0001 0000 0000 0001 1011
 p & SMASK:	16	H>:	10	S-B->:5
-                                                                          1 0000
+                                                                           1 0000
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -132,6 +228,42 @@ Bit-Size->:	32			Hex-Size->:8
                                          1111 1111 1111 1111 1000 0000 0000 0000
 **/
                    
+/**
+ForkJoinPool参数：
+parallelism = 8
+factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@762} 
+handler = null
+asyncMode = false
+corePoolSize = 0
+maximumPoolSize = 32767
+minimumRunnable = 1
+saturate = null
+keepAliveTime = 60000
+unit = {TimeUnit@763} "MILLISECONDS"
+p = 8
+size = 16
+corep = 8
+maxSpares = 32759
+minAvail = 1
+pid = "1"
+
+实例化ForkJoinPool：
+keepAlive = 60000
+stealCount = 0
+scanRover = 0
+threadIds = 0
+bounds = 2146959353
+mode = 8
+queues = {ForkJoinPool$WorkQueue[16]@767} 
+registrationLock = {ReentrantLock@766}
+"java.util.concurrent.locks.ReentrantLock@5b2133b1[Unlocked]"
+termination = null
+workerNamePrefix = null
+factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@762} 
+ueh = null
+saturate = null
+ctl = -1970359196712960
+**/
 
 /**
  * 运行栈
@@ -169,7 +301,8 @@ Bit-Size->:	32			Hex-Size->:8
    nsteals = 0
    
  registrationLock = {ReentrantLock@777} "
- java.util.concurrent.locks.ReentrantLock@3af49f1c[Locked by thread ForkJoinPool-1-worker-1]"
+ java.util.concurrent.locks.ReentrantLock@3af49f1c
+ [Locked by thread ForkJoinPool-1-worker-1]"
  termination = null
  workerNamePrefix = "ForkJoinPool-1-worker-"
  factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@779} 
@@ -227,7 +360,8 @@ queues = {ForkJoinPool$WorkQueue[16]@776}
  *
  *
  *pool = {ForkJoinPool@765} "java.util.concurrent.ForkJoinPool@3af49f1c[
- *Running, parallelism = 8, size = 1, active = 1, running = 1, steals = 0, tasks = 0, submissions = 0]"
+ *Running, parallelism = 8, size = 1, active = 1, running = 1, steals = 0,
+ *tasks = 0, submissions = 0]"
  keepAlive = 60000
  stealCount = 0
  scanRover = 0
@@ -264,9 +398,97 @@ queues = {ForkJoinPool$WorkQueue[16]@776}
  saturate = null
  ctl = -1688879925035008
  
+ *
+ *fork/join runtime
+ *main 运行在
+ *task.joinForPoolInvoke(this)
+ *  awaitDone
+ *      LockSupport.park();
+ *      
+ * 
+ * ForkJoinTaskThread 
+ *  runWorker
+ *      scan
+ *          topLevelExec
+ *          
+ this = {ForkJoinPool@781} "java.util.concurrent.ForkJoinPool
+ @681a9515[Running, parallelism = 8, size = 1, active = 1, running = 1,
+ steals = 0, tasks = 0, submissions = 1]"
+ keepAlive = 60000
+ stealCount = 0
+ scanRover = 0
+ threadIds = 1
+ bounds = 2146959353
+ mode = 8
+ queues = {ForkJoinPool$WorkQueue[16]@782} 
+  2 = {ForkJoinPool$WorkQueue@776} 
+  5 = {ForkJoinPool$WorkQueue@801} 
+ registrationLock = {ReentrantLock@788}
+ "java.util.concurrent.locks.ReentrantLock@3af49f1c[Unlocked]"
+  sync = {ReentrantLock$NonfairSync@829}
+  "java.util.concurrent.locks.ReentrantLock$NonfairSync@12682cee[State = 0, empty queue]"
+ termination = null
+ workerNamePrefix = "ForkJoinPool-1-worker-"
+ factory = {ForkJoinPool$DefaultForkJoinWorkerThreadFactory@790} 
+ ueh = null
+ saturate = null
+ ctl = -1688879925035008
+w = {ForkJoinPool$WorkQueue@801} 
+ phase = 5
+ stackPred = 1013904242
+ config = 131077
+ base = 0
+ array = {ForkJoinTask[256]@824} 
+ owner = {ForkJoinWorkerThread@802} "Thread[ForkJoinPool-1-worker-1,5,main]"
+ top = 0
+ source = 0
+ nsteals = 0
+prevSrc = 0
+r = -1575449550
+queues = {ForkJoinPool$WorkQueue[16]@782} 
+ 2 = {ForkJoinPool$WorkQueue@776} 
+  phase = -1
+  stackPred = 0
+  config = 1013904242
+  base = 0
+  array = {ForkJoinTask[256]@777} 
+   0 = {ForkJoinPoolTest$Calculate@778} 
+    start = 10
+    end = 10000000
+    result = null
+    status = 0
+    aux = {ForkJoinTask$Aux@826} 
+     thread = {Thread@1} "Thread[main,5,main]"
+     ex = null
+     next = null
+  owner = null
+  top = 1
+  source = 0
+  nsteals = 0
+ 5 = {ForkJoinPool$WorkQueue@801} 
+  phase = 5
+  stackPred = 1013904242
+  config = 131077
+  base = 0
+  array = {ForkJoinTask[256]@824} 
+  owner = {ForkJoinWorkerThread@802} "Thread[ForkJoinPool-1-worker-1,5,main]"
+  top = 0
+  source = 0
+  nsteals = 0
+  
+  *
+  *fork-push
+  *
+this = {ForkJoinPool$WorkQueue@801} 
+task = {ForkJoinPoolTest$Calculate@883} 
+pool = {ForkJoinPool@781} "java.util.concurrent.ForkJoinPool@681a9515[Running,
+parallelism = 8, size = 1, active = 1, running = 1, steals = 0,
+tasks = 0, submissions = 0]"
+top = 0
+array = {ForkJoinTask[256]@824} 
  **/
  
-  public class FoolJoinPool_Bit{   
+ 
 
     /**
      *     * 核心信息：
@@ -445,82 +667,8 @@ queues = {ForkJoinPool$WorkQueue[16]@776}
      *         
      *      source
      *          q.source & SMASK
-     *          
-     *  状态信息写入顺序 w:写 r：读  非w任务操作: q
-     *  
-     *                       |stackPred|config |phase |source  | base
-     *                       --------------------------------- |-------  
-     *      new ForkJoinPool |         |   w  |       |        |
-     *      -------------------------------------------------- |------
-     *      new WorkQueue    |         |   w  |       |        |
-     *      -------------------------------------------------- |------
-     *      submissionQueue  |         |      |       |        |
-     *      -------------------------------------------------- |------
-     *       signalWork      |    v.r  |      |   w   |        |
-     *      ---------------------------------------------------|------
-     *      registerWorker   |    w    |  w/r |       |        |
-     *      ---------------------------------------------------|------
-     *      runWorker        |    r    |   w  |       | |
-     *      ---------------------------------------------------|------
-     *      scan             |         |      |       |   w    | q.r
-     *      ---------------------------------------------------|------
-     *      awaitWork        |    w    |  w/r |   r   | r q.r  | q.r
-     *      ---------------------------------------------------|------
-     *      helpJoin         |         |   r  |       | w/r q.r| q.r
-     *      ---------------------------------------------------|------
-     *      tryCompensate    |    r    |      |   w   |        | 
-     *      ---------------------------------------------------|------
-     *      helpComplete     |         |   r  |       |        |q.r
-     *      ---------------------------------------------------|-----
      *
-     *      invoke -> submissionQueue-> new WorkQueue -> signalWork
-     *      fork ->              push                  -> signalWork
-     *      registerWorker-> runWorker       -> scan   -> signalWork
-     *                                                 -> awaitWork
-     *      ForkJoinTask invoke/join/get     -> awaitDone            
-     *                                                 -> helpJoin
-     *                                                 -> helpComplete
-     *      signalWork
-     *          v.phase = sp;
-     *
-     *      base：
-     *          setBaseOpaque
-     *              helpComplete(ForkJoinTask<?>, WorkQueue, boolean)
-     *              pollScan(boolean)
-     *              
-     *          scan
-     *              b = q.base
-     *              
-     *          helpJoin
-     *              q.base != b
-     *              
-     *          ForkJoinPool.WorkQueue
-     *              tryPoll()
-     *              nextLocalTask(int)
-     *              helpAsyncBlocker(ManagedBlocker)
-     *              
-     *     // signalWork
-     *     //long nc = (v.stackPred & SP_MASK) | (UC_MASK & (c + RC_UNIT));
-     *
-     *     // awaitWork
-     *    //c = ((prevCtl - RC_UNIT) & UC_MASK) | (phase & SP_MASK);
-     *
-     *    //tryCompensate
-     *    //long nc = ((long)v.stackPred & SP_MASK) | (UC_MASK & c);
-     *
-     *    // long nc = ((RC_MASK & (c - RC_UNIT)) | (~RC_MASK & c));
-     *    // long nc = ((c + TC_UNIT) & TC_MASK) | (c & ~TC_MASK);
-     *
-     *    awaitWork
-     *       compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
-     *         //11111 1111 1111 1111 111 1111 1111 1111
-     *         (prevCtl & SP_MASK)))) {
-     *
-     *   // RC/TC 计数处1
-     *    if (c == (c = compareAndExchangeCtl(
-     *       c, ((RC_MASK & (c + RC_UNIT)) | // RC增加
-     *       (TC_MASK & (c + TC_UNIT)))))) { // TC增加      
-     */
+     **/          
    
    
     // Bounds
