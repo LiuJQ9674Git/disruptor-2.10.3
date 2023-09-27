@@ -20,18 +20,31 @@ public class StampedLock implements java.io.Serializable {
     // not writing and conservatively non-overflowing
     private static final long RSAFE = ~(3L << (LG_READERS - 1));
 
-    /**
-    * RUNIT->:	1	    Bit->:	           1
-    * WBIT ->:	128	    Bit->:	   1000 0000
-    * RFULL->:	126	    Bit->:	   0111 1110
-    * ABITS->:	255	    Bit->:	   1111 1111
-    *          -256            1 1 0000 0000
-    * RBITS->:	127	    Bit->:	   0111 1111
-    * SBITS->:	-128	Bit->:   1 1000 0000 取反
-    * SAFE_->:	192	    Bit->:	   1100 0000
-    * RSAFE->:	-193    Bit->:   1 0011 1111 取反
-    * ORIGIN->:256	    Bit->:   1 0000 0000
-    */
+    /*
+     *WBIT:	128	Hex->:	80
+     *                  Bit-Size->:	8			Hex-Size->:2
+     *                                                                     1000 0000
+     *                                                                     
+     *RBITS:	127	Hex->:	7f
+     *                  Bit-Size->:	7			Hex-Size->:2
+     *                                                                      111 1111
+     *                                                                      
+     *RFULL:	126	Hex->:	7e
+     *                  Bit-Size->:	7			Hex-Size->:2
+     *                                                                      111 1110
+     *                                                                      
+     *ABITS:	255	Hex->:	ff
+     *                  Bit-Size->:	8			Hex-Size->:2
+     *                                                                      1111 1111
+     *                                                                      
+     *SBITS:	127	Hex->:	ffffffffffffff80
+     *                  Bit-Size->:	64			Hex-Size->:16
+     *1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1000 0000
+     *
+     *RSAFE:	-193	Hex->:	ffffffffffffff3f
+     *                  Bit-Size->:	64			Hex-Size->:16
+     *1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 0011 1111
+     */
             
     /*
      * 3 stamp modes can be distinguished by examining (m = stamp & ABITS):
@@ -135,7 +148,6 @@ public class StampedLock implements java.io.Serializable {
     }
 
     
-
     /**
      * Exclusively acquires the lock, blocking if necessary
      * until available.

@@ -30,7 +30,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * does not permit {@code null} elements.
  *
  *一种阻塞队列，其中每个插入操作都必须等待另一个线程执行相应的移除操作，反之亦然。
- *同步队列没有任何内部容量，甚至没有一个容量。您无法查看同步队列，因为只有当您尝试删除某个元素时，
+ *同步队列没有任何内部容量，甚至没有一个容量。
+ *您无法查看同步队列，因为只有当您尝试删除某个元素时，
  *该元素才会出现；
  *除非另一个线程试图删除某个元素，否则无法插入该元素（使用任何方法）；
  *您不能迭代，因为没有什么可迭代的。队列的头是第一个排队的插入线程试图添加到队列中的元素；
@@ -58,7 +59,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * methods of the {@link Collection} and {@link Iterator} interfaces.
  *
  * <p>This class is a member of the
- * <a href="{@docRoot}/java.base/java/util/package-summary.html#CollectionsFramework">
+ * <a href="{@docRoot}/java.base/java/util/package-summary.
+ * html#CollectionsFramework">
  * Java Collections Framework</a>.
  *
  * @since 1.5
@@ -75,7 +77,8 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
      * with Condition Synchronization", by W. N. Scherer III and
      * M. L. Scott.  18th Annual Conf. on Distributed Computing,
      * Oct. 2004 (see also
-     * http://www.cs.rochester.edu/u/scott/synchronization/pseudocode/duals.html).
+     * http://www.cs.rochester.edu/u/scott/synchronization/
+     pseudocode/duals.html).
      * The (Lifo) stack is used for non-fair mode, and the (Fifo)
      * queue for fair mode. The performance of the two is generally
      * similar. Fifo usually supports higher throughput under
@@ -111,8 +114,10 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
      *  1. The original algorithms used bit-marked pointers, but
      *     the ones here use mode bits in nodes, leading to a number
      *     of further adaptations.
+     *     
      *  2. SynchronousQueues must block threads waiting to become
      *     fulfilled.
+     *     
      *  3. Support for cancellation via timeout and interrupts,
      *     including cleaning out cancelled nodes/threads
      *     from lists to avoid garbage retention and memory depletion.
