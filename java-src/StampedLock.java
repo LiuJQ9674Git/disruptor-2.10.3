@@ -59,6 +59,7 @@ public class StampedLock.Code8 implements java.io.Serializable {
         volatile WNode cowait;    // list of linked readers
         volatile Thread thread;   // non-null while possibly parked
         volatile int status;      // 0, WAITING, or CANCELLED
+        //带有 final 字段的类通常是通过在构造函数返回时发出Release fence形式来实现的
         final int mode;           // RMODE or WMODE
         WNode(int m, WNode p) { mode = m; prev = p; }
     }
