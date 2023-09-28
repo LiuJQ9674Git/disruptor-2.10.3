@@ -4,7 +4,7 @@ import java.util.concurrent.TimeUnit;
 import jdk.internal.misc.Unsafe;
 import jdk.internal.vm.annotation.ReservedStackAccess;
 
-public class StampedLock implements java.io.Serializable {
+public class StampedLock.Code17 implements java.io.Serializable {
 
 
     /** The number of bits to use for reader count before overflowing */
@@ -21,23 +21,26 @@ public class StampedLock implements java.io.Serializable {
     private static final long RSAFE = ~(3L << (LG_READERS - 1));
 
     /*
-     *WBIT:	128	Hex->:	80
+     *ORIGIN:	256	    Hex->:	100
+     *Bit-Size->:	                9			Hex-Size->:3
+     *                                                                   1 0000 0000
+     *WBIT:	    128	    Hex->:	80
      *                  Bit-Size->:	8			Hex-Size->:2
      *                                                                     1000 0000
      *                                                                     
-     *RBITS:	127	Hex->:	7f
+     *RBITS:	127	    Hex->:	7f
      *                  Bit-Size->:	7			Hex-Size->:2
      *                                                                      111 1111
      *                                                                      
-     *RFULL:	126	Hex->:	7e
+     *RFULL:	126	    Hex->:	7e
      *                  Bit-Size->:	7			Hex-Size->:2
      *                                                                      111 1110
      *                                                                      
-     *ABITS:	255	Hex->:	ff
+     *ABITS:	255	    Hex->:	ff
      *                  Bit-Size->:	8			Hex-Size->:2
      *                                                                      1111 1111
      *                                                                      
-     *SBITS:	127	Hex->:	ffffffffffffff80
+     *SBITS:	127	    Hex->:	ffffffffffffff80
      *                  Bit-Size->:	64			Hex-Size->:16
      *1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 1000 0000
      *
@@ -123,11 +126,6 @@ public class StampedLock implements java.io.Serializable {
     private transient volatile Node head;
     /** Tail (last) of CLH queue */
     private transient volatile Node tail;
-
-    // views
-    transient ReadLockView readLockView;
-    transient WriteLockView writeLockView;
-    transient ReadWriteLockView readWriteLockView;
 
     /** Lock sequence/state */
     private transient volatile long state;
