@@ -136,6 +136,8 @@ public class StampedLock.Code17 implements java.io.Serializable {
      * Creates a new lock, initially in unlocked state.
      */
     public StampedLock() {
+        //ORIGIN:	256	Hex->:	100 Bit-Size->:	9	Hex-Size->:3
+        //1 0000 0000
         state = ORIGIN;
     }
 
@@ -155,7 +157,18 @@ public class StampedLock.Code17 implements java.io.Serializable {
     @ReservedStackAccess
     public long writeLock() {
         // try unconditional CAS confirming weak read
+        //ORGIN:
+        //                            1 0000 0000
+        //
+        //ABITS: 255	Hex->:	ff Bit-Size->:	8	Hex-Size->:2
+        //                              1111 1111
+        //~ABITS
+        //1111 1111 1111 1111 1111 1111 0000 0000
         long s = U.getLongOpaque(this, STATE) & ~ABITS, nextState;
+        //WBIT:	128	Hex->:	80
+        //Bit-Size->:	8Hex-Size->:2
+        //                              1000 0000
+        //                            1 0000 0000
         if (casState(s, nextState = s | WBIT)) {
             U.storeStoreFence();
             return nextState;
@@ -172,6 +185,13 @@ public class StampedLock.Code17 implements java.io.Serializable {
     @ReservedStackAccess
     public long readLock() {
         // unconditionally optimistically try non-overflow case once
+        //
+        //256  1 0000 0000
+        //ORIGIN:	256	Hex->:	100 Bit-Size->:	9	Hex-Size->:3
+        //                            1 0000 0000
+        //RSAFE:-193 Hex->:ffffffffffffff3f Bit-Size->:64	Hex-Size->:16
+        //1111 1111 1111 1111 1111 1111 0011 1111
+        //s:256
         long s = U.getLongOpaque(this, STATE) & RSAFE, nextState;
         if (casState(s, nextState = s + RUNIT))
             return nextState;
@@ -186,6 +206,10 @@ public class StampedLock.Code17 implements java.io.Serializable {
      * @param s a write-locked state (or stamp)
      */
     private static long unlockWriteState(long s) {
+        //WBIT:	    128	Hex->:	80  Bit-Size->:	8	Hex-Size->:2
+        //  1000 0000
+        //ORIGIN:   256	Hex->:	100 Bit-Size->:	9	Hex-Size->:3
+        //1 0000 0000
         return ((s += WBIT) == 0L) ? ORIGIN : s;
     }
 
@@ -200,6 +224,11 @@ public class StampedLock.Code17 implements java.io.Serializable {
     @ReservedStackAccess
     public void unlockRead(long stamp) {
         long s, m;
+        //RBITS:	127	Hex->:	7f Bit-Size->:	7	Hex-Size->:2
+        //                               111 1111
+        //SBITS:	-128 Hex->:	ffffffffffffff80 Bit-Size->: 64	Hex-Size->:16
+        //1111 1111 1111 1111 1111 1111 1000 0000
+        //RUNIT: 1
         if ((stamp & RBITS) != 0L) {
             while (((s = state) & SBITS) == (stamp & SBITS) &&
                    ((m = s & RBITS) != 0L)) {
@@ -233,8 +262,12 @@ public class StampedLock.Code17 implements java.io.Serializable {
      */
     @ReservedStackAccess
     public void unlockWrite(long stamp) {
-        if (state != stamp || (stamp & WBIT) == 0L)
+        //stamp:          1 1000 0000
+        //WBIT:	128	Hex->:	80 Bit-Size->:	8	Hex-Size->:2
+        //                  1000 0000
+        if (state != stamp || (stamp & WBIT) == 0L){
             throw new IllegalMonitorStateException();
+        }
         releaseWrite(stamp);
     }
     
@@ -263,6 +296,10 @@ public class StampedLock.Code17 implements java.io.Serializable {
     @ReservedStackAccess
     private long tryAcquireWrite() {
         long s, nextState;
+        //ABITS:255	Hex->:ff Bit-Size->:8 Hex-Size->:2
+        //1111 1111
+        //WBIT:	128	Hex->:	80 Bit-Size->:	8	Hex-Size->:2
+        //1000 0000
         if (((s = state) & ABITS) == 0L && casState(s, nextState = s | WBIT)) {
             U.storeStoreFence();
             return nextState;
