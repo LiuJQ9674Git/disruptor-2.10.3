@@ -32,12 +32,19 @@ import java.util.function.Predicate;
  * of elements requires a traversal of the elements, and so may report
  * inaccurate results if this collection is modified during traversal.
  *
+ * 注意，与大多数集合不同，｛size｝方法不是一个常量时间操作。由于这些队列的异步性质，
+ * 确定当前元素数量需要遍历元素，因此如果在遍历过程中修改此集合，则可能会报告不准确的结果。
+ * 
  * <p>Bulk operations that add, remove, or examine multiple elements,
  * such as {@link #addAll}, {@link #removeIf} or {@link #forEach},
  * are <em>not</em> guaranteed to be performed atomically.
  * For example, a {@code forEach} traversal concurrent with an {@code
  * addAll} operation might observe only some of the added elements.
  *
+ * 添加、删除或检查多个元素的大容量操作，如｛link#addAll｝、｛link#removeIf｝
+ * 或｛link#forEach｝，不能保证以原子方式执行。例如，与{addAll}操作
+ * 并行的{forEach}遍历可能只观察到一些添加的元素。
+ * 
  * <p>This class and its iterator implement all of the <em>optional</em>
  * methods of the {@link Collection} and {@link Iterator} interfaces.
  *
@@ -1132,19 +1139,6 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
         return n;
     }
 
-    /**
-     * Returns an iterator over the elements in this queue in proper sequence.
-     * The elements will be returned in order from first (head) to last (tail).
-     *
-     * <p>The returned iterator is
-     * <a href="package-summary.html#Weakly"><i>weakly consistent</i></a>.
-     *
-     * @return an iterator over the elements in this queue in proper sequence
-     */
-    public Iterator<E> iterator() {
-        return new Itr();
-    }
-
     public E peek() {
         restartFromHead: for (;;) {
             for (Node p = head; p != null;) {
@@ -1292,48 +1286,6 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
      */
     public int remainingCapacity() {
         return Integer.MAX_VALUE;
-    }
-
-    /**
-     * Saves this queue to a stream (that is, serializes it).
-     *
-     * @param s the stream
-     * @throws java.io.IOException if an I/O error occurs
-     * @serialData All of the elements (each an {@code E}) in
-     * the proper order, followed by a null
-     */
-    private void writeObject(java.io.ObjectOutputStream s)
-        throws java.io.IOException {
-        s.defaultWriteObject();
-        for (E e : this)
-            s.writeObject(e);
-        // Use trailing null as sentinel
-        s.writeObject(null);
-    }
-
-    /**
-     * Reconstitutes this queue from a stream (that is, deserializes it).
-     * @param s the stream
-     * @throws ClassNotFoundException if the class of a serialized object
-     *         could not be found
-     * @throws java.io.IOException if an I/O error occurs
-     */
-    private void readObject(java.io.ObjectInputStream s)
-        throws java.io.IOException, ClassNotFoundException {
-
-        // Read in elements until trailing null sentinel found
-        Node h = null, t = null;
-        for (Object item; (item = s.readObject()) != null; ) {
-            Node newNode = new Node(item);
-            if (h == null)
-                h = t = newNode;
-            else
-                t.appendRelaxed(t = newNode);
-        }
-        if (h == null)
-            h = t = new Node();
-        head = h;
-        tail = t;
     }
 
     /**
