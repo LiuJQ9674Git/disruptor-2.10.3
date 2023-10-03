@@ -135,18 +135,35 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      *   indefinitely due to creation of an Iterator or simply a
      *   poll() that has lost its time slice.
      *
+     *   队列中包含的元素是节点中可从头访问的非null项。CAS将Node的项引用原子化地从队列中删除。
+     *   所有元素从头部的可达性必须保持不变，即使在导致头部前进的同时修改的情况下也是如此。
+     *   由于创建了一个Iterator或只是一个丢失了时间片的poll()，
+     *   出队节点可能会无限期地保持使用状态。
+     *   
      * The above might appear to imply that all Nodes are GC-reachable
-     * from a predecessor dequeued Node.  That would cause two problems:
+     * from a predecessor dequeued Node.
+     *   上面的内容可能意味着所有节点都可以从前一个排队节点GC访问。
+     *   
+     * That would cause two problems:
      * - allow a rogue Iterator to cause unbounded memory retention
+     *   允许迭代器导致无限内存保留
+     *   
      * - cause cross-generational linking of old Nodes to new Nodes if
      *   a Node was tenured while live, which generational GCs have a
      *   hard time dealing with, causing repeated major collections.
+     *
+     *   如果一个节点在存活期间被终身使用，则会导致旧节点与新节点的跨代链接，
+     *   而这一代GC很难处理，从而导致重复的主要收集。
+     *   
      * However, only non-deleted Nodes need to be reachable from
      * dequeued Nodes, and reachability does not necessarily have to
      * be of the kind understood by the GC.  We use the trick of
      * linking a Node that has just been dequeued to itself.  Such a
      * self-link implicitly means to advance to head.
      *
+     * 然而，只有未删除的节点才需要从退出队列的节点访问，并且可达性不一定必须是GC所理解的那种。
+     * 我们使用的技巧是将刚刚出列的节点链接到它自己。这种自我链接隐含着向头部前进的意思。
+     * 
      * Both head and tail are permitted to lag.  In fact, failing to
      * update them every time one could is a significant optimization
      * (fewer CASes). As with LinkedTransferQueue (see the internal
@@ -181,6 +198,9 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * for a volatile write to item.  This allows the cost of enqueue
      * to be "one-and-a-half" CASes.
      *
+     * 在构造Node时（在将其排队之前），我们避免为易失性volatile的写入item字段。
+     * 这使得排队的费用为“一个半”CASes。
+     * 
      * Both head and tail may or may not point to a Node with a
      * non-null item.  If the queue is empty, all items must of course
      * be null.  Upon creation, both head and tail refer to a dummy
@@ -391,17 +411,15 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                 }
                 // Lost CAS race to another thread; re-read next
             }
-            //cas操作包括NEXT.cas和TAIL的.cas 失败，非稳态，执行下面操作，
-            //p.next和p相等，
+            //NEXT.cas失败
             //Next把p的下个节点设置为newNode，而tail也设置了newNode
-            //这种中间态存在p==q,
+            //这种中间态存在p==q和p!=q,
             else if (p == q) 
                 // We have fallen off list.  If tail is unchanged, it
                 // will also be off-list, in which case we need to
                 // jump to head, from which all live nodes are always
                 // reachable.  Else the new tail is a better bet.
-                // p和q已经不指向从列表，
-                // 如果tail保持不变，它也将不在列表中，
+                // 下链，如果tail保持不变，它也将不在列表中，
                 // 在这种情况下，我们需要跳到head，从head可以始终访问所有在线的节点。
                 // 否则，新tail是更好的选择。
                 // t改变了，即tail设置了新节点，此时t不是原来的tail
@@ -411,7 +429,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                 //Next原子把p指向新节点时， p.next则不是原来tail的next
                 // Check for tail updates after two hops.
                 // p不是为t节点,二者在节点构造中已经分离，，t也不是
-               
+                //第二次循环进入
                 p = (p != t && t != (t = tail)) ? t : q;
         }
     }

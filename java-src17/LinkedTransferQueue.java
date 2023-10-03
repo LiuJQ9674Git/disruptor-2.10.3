@@ -167,9 +167,9 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
      * updates on head/tail fields.
      *
      * 一旦节点匹配，其匹配状态就不会再出现改变因此，
-     * 我们可以安排他们的链接列表linked list包含零个或多个匹配节点的前缀，
-     * 后跟零个或更多个不匹配节点的后缀。
-     * （请注意，我们允许前缀和后缀都为零长度，这反过来意味着我们不使用伪标头。）
+     * 我们可以安排他们的链接列表linked list包含零个或多个匹配节点的前继，
+     * 后跟零个或更多个不匹配节点的后继。
+     * （请注意，我们允许前继和后继都为零长度，这反过来意味着我们不使用伪标头。）
      * 如果我们不关心时间或空间效率，我们可以通过从指针遍历到初始节点来正确执行入队和出队操作；
      * 在匹配时对第一个不匹配节点的项item进行CAS处理，在追加时对后面节点的下一个字段进行CAS处理。
      * 虽然这本身就是一个糟糕的想法，但它的好处是不需要对头/尾字段进行任何原子更新。
@@ -215,7 +215,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
      * with a given probability per traversal step.
      *
      * 具有松弛的双队列与普通M&S双队列的不同之处在于，在匹配、附加甚至遍历节点时，
-     * 有时只更新头指针或尾指针；以便保持目标松弛。
+     * 有时只需要更新头指针或尾指针；以便保持目标松弛。
      * “有时”的概念可以通过几种方式加以实施。
      * 最简单的方法是在每个遍历步骤上使用递增的per-operation计数器，
      * 并在计数超过阈值时尝试（通过CAS）更新相关的队列指针。
@@ -298,16 +298,13 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
      * (especially considering that writes and CASes equally require
      * additional GC bookkeeping ("write barriers") that are sometimes
      * more costly than the writes themselves because of contention).
-     * 
-     * 如果GC延迟注意到任何任意旧的节点都变成了垃圾，那么所有新的死节点也将不被回收。
-     * （在非GC环境中也会出现类似的问题。）为了在我们的实现中解决这个问题，
-     * 在CASing推进头指针时，我们将前一个头的“下一个”链接设置为仅指向它自己；
-     * 从而限制了死节点的链的长度。
-     * （我们也会采取类似的措施来清除其他Node字段中可能存在的垃圾保留值。）
-     * 然而，这样做会增加遍历的复杂性：如果任何“下一个”指针链接到它自己，
-     * 则表明当前线程落后于头部更新，因此遍历必须从“头部”开始继续。
-     * 试图从“尾部”开始寻找当前尾部的遍历也可能遇到自链接，
-     * 在这种情况下，它们也会在“头部”继续。
+     *
+     * 在基于松弛的方案中，甚至不使用CAS进行更新是很诱人的（类似于Ladan-Mozes和Shavit）。
+     * 然而，在上述链接遗忘机制下，这不能用于头部更新，因为更新可能会将头部留在分离的节点。
+     * 虽然直接写入可以用于尾部更新，但它们增加了长回溯的风险，从而增加了长垃圾链，
+     * 考虑到执行CAS与写入的成本差异在每次操作未触发时较小
+     * （特别是考虑到写入和CAS同样需要额外的GC记账（“写入障碍”），
+     * 有时由于争用而比写入本身成本更高）。
      * 
      * *** Overview of implementation ***
      *
