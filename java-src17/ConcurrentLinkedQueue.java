@@ -212,7 +212,6 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * 那么所有item当然都必须为空。创建时，头和尾都引用了一个具有null的item的虚拟节点。
      * 头部和尾部都只使用CAS更新，所以它们永远不会回收，尽管这只是一个优化。
      */
-
     static final class Node<E> {
         volatile E item;
         volatile Node<E> next;
@@ -320,13 +319,9 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         return p;
     }
 
-    
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
-     *
-     * @return {@code true} (as specified by {@link Queue#offer})
-     * @throws NullPointerException if the specified element is null
      */
     public boolean offer(E e) {
         final Node<E> newNode = new Node<E>(Objects.requireNonNull(e));
@@ -377,6 +372,21 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         }
     }
 
+    public E peek() {
+        restartFromHead: for (;;) {
+            for (Node<E> h = head, p = h, q;; p = q) {
+                final E item;
+                if ((item = p.item) != null
+                    || (q = p.next) == null) {
+                    updateHead(h, p);
+                    return item;
+                }
+                else if (p == q)
+                    continue restartFromHead;
+            }
+        }
+    }
+    
     public E poll() {
         restartFromHead: for (;;) {
             for (Node<E> h = head, p = h, q;; p = q) {
@@ -391,21 +401,6 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                 else if ((q = p.next) == null) {
                     updateHead(h, p);
                     return null;
-                }
-                else if (p == q)
-                    continue restartFromHead;
-            }
-        }
-    }
-
-    public E peek() {
-        restartFromHead: for (;;) {
-            for (Node<E> h = head, p = h, q;; p = q) {
-                final E item;
-                if ((item = p.item) != null
-                    || (q = p.next) == null) {
-                    updateHead(h, p);
-                    return item;
                 }
                 else if (p == q)
                     continue restartFromHead;
@@ -970,27 +965,6 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                     Spliterator.NONNULL |
                     Spliterator.CONCURRENT);
         }
-    }
-
-    /**
-     * Returns a {@link Spliterator} over the elements in this queue.
-     *
-     * <p>The returned spliterator is
-     * <a href="package-summary.html#Weakly"><i>weakly consistent</i></a>.
-     *
-     * <p>The {@code Spliterator} reports {@link Spliterator#CONCURRENT},
-     * {@link Spliterator#ORDERED}, and {@link Spliterator#NONNULL}.
-     *
-     * @implNote
-     * The {@code Spliterator} implements {@code trySplit} to permit limited
-     * parallelism.
-     *
-     * @return a {@code Spliterator} over the elements in this queue
-     * @since 1.8
-     */
-    @Override
-    public Spliterator<E> spliterator() {
-        return new CLQSpliterator();
     }
 
     /**
