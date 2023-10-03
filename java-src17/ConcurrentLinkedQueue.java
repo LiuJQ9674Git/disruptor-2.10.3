@@ -320,46 +320,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         return p;
     }
 
-    /**
-     * Tries to CAS pred.next (or head, if pred is null) from c to p.
-     * Caller must ensure that we're not unlinking the trailing node.
-     */
-    private boolean tryCasSuccessor(Node<E> pred, Node<E> c, Node<E> p) {
-        // assert p != null;
-        // assert c.item == null;
-        // assert c != p;
-        if (pred != null)
-            return NEXT.compareAndSet(pred, c, p);
-        if (HEAD.compareAndSet(this, c, p)) {
-            NEXT.setRelease(c, c);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Collapse dead nodes between pred and q.
-     * @param pred the last known live node, or null if none
-     * @param c the first dead node
-     * @param p the last dead node
-     * @param q p.next: the next live node, or null if at end
-     * @return either old pred or p if pred dead or CAS failed
-     */
-    private Node<E> skipDeadNodes(Node<E> pred, Node<E> c, Node<E> p, Node<E> q) {
-        // assert pred != c;
-        // assert p != q;
-        // assert c.item == null;
-        // assert p.item == null;
-        if (q == null) {
-            // Never unlink trailing node.
-            if (c == p) return pred;
-            q = p;
-        }
-        return (tryCasSuccessor(pred, c, q)
-                && (pred == null || ITEM.get(pred) != null))
-            ? pred : p;
-    }
-
+    
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
@@ -511,6 +472,46 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
             }
             return count;
         }
+    }
+
+    /**
+     * Tries to CAS pred.next (or head, if pred is null) from c to p.
+     * Caller must ensure that we're not unlinking the trailing node.
+     */
+    private boolean tryCasSuccessor(Node<E> pred, Node<E> c, Node<E> p) {
+        // assert p != null;
+        // assert c.item == null;
+        // assert c != p;
+        if (pred != null)
+            return NEXT.compareAndSet(pred, c, p);
+        if (HEAD.compareAndSet(this, c, p)) {
+            NEXT.setRelease(c, c);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Collapse dead nodes between pred and q.
+     * @param pred the last known live node, or null if none
+     * @param c the first dead node
+     * @param p the last dead node
+     * @param q p.next: the next live node, or null if at end
+     * @return either old pred or p if pred dead or CAS failed
+     */
+    private Node<E> skipDeadNodes(Node<E> pred, Node<E> c, Node<E> p, Node<E> q) {
+        // assert pred != c;
+        // assert p != q;
+        // assert c.item == null;
+        // assert p.item == null;
+        if (q == null) {
+            // Never unlink trailing node.
+            if (c == p) return pred;
+            q = p;
+        }
+        return (tryCasSuccessor(pred, c, q)
+                && (pred == null || ITEM.get(pred) != null))
+            ? pred : p;
     }
 
     /**
