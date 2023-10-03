@@ -220,6 +220,8 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         /**
          * Constructs a node holding item.  Uses relaxed write because
          * item can only be seen after piggy-backing publication via CAS.
+         * 构造一个节点保持项item。使用松弛relaxed写入（Release/Opeque），
+         * 因为只有在通过CAS顺便使得piggy-backing发布后才能看到项目。
          * 之后通过CAS方式发布
          */
         Node(E item) {
@@ -279,29 +281,6 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
         head = tail = new Node<E>();
     }
 
-    /**
-     * Creates a {@code ConcurrentLinkedQueue}
-     * initially containing the elements of the given collection,
-     * added in traversal order of the collection's iterator.
-     *
-     * @param c the collection of elements to initially contain
-     * @throws NullPointerException if the specified collection or any
-     *         of its elements are null
-     */
-    public ConcurrentLinkedQueue(Collection<? extends E> c) {
-        Node<E> h = null, t = null;
-        for (E e : c) {
-            Node<E> newNode = new Node<E>(Objects.requireNonNull(e));
-            if (h == null)
-                h = t = newNode;
-            else
-                t.appendRelaxed(t = newNode);
-        }
-        if (h == null)
-            h = t = new Node<E>();
-        head = h;
-        tail = t;
-    }
 
     // Have to override just to update the javadoc
 
@@ -320,6 +299,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
     /**
      * Tries to CAS head to p. If successful, repoint old head to itself
      * as sentinel for succ(), below.
+     * 尝试将CAS头对p。如果成功，则将旧头重新指向自身作为succ（）的哨兵。
      */
     final void updateHead(Node<E> h, Node<E> p) {
         // assert h != null && p != null && (h == p || h.item == null);
@@ -331,6 +311,8 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * Returns the successor of p, or the head node if p.next has been
      * linked to self, which will only be true if traversing with a
      * stale pointer that is now off the list.
+     * 返回p的后继节点，或者如果p.next已链接到self，则返回head节点，
+     * 只有当使用现在不在列表中的过时指针进行遍历时，为真。
      */
     final Node<E> succ(Node<E> p) {
         if (p == (p = p.next))
