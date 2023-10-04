@@ -61,28 +61,37 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     /**
      * A node from which the first live (non-deleted) node (if any)
      * can be reached in O(1) time.
+     * 不变量
      * Invariants:
      * - all live nodes are reachable from head via succ()
+     *   所有活动节点都可以通过succ（）从头访问
      * - head != null
      * - (tmp = head).next != tmp || tmp != head
      * Non-invariants:
+     * 非不变量
      * - head.item may or may not be null.
+     *   head.item可以为空，也可以不为空。
      * - it is permitted for tail to lag behind head, that is, for tail
      *   to not be reachable from head!
+     *   允许尾部落后于头部，也就是说，尾部不能从头部到达！
      */
     private transient volatile Node<E> head;
 
     /**
      * A node from which the last node on list (that is, the unique
      * node with node.next == null) can be reached in O(1) time.
+     * 可以在O(1)时间内到达列表上最后一个节点（即node.next==null的唯一节点）的节点。
      * Invariants:
      * - the last node is always reachable from tail via succ()
      * - tail != null
      * Non-invariants:
      * - tail.item may or may not be null.
+     *   tail.item可能为空，也可能不为空。
      * - it is permitted for tail to lag behind head, that is, for tail
      *   to not be reachable from head!
+     *   允许尾部落后于头部，也就是说，尾部不能从头部到达！
      * - tail.next may or may not be self-pointing to tail.
+     *   tail.next可以是也可以不是自指向tail。
      */
     private transient volatile Node<E> tail;
 
@@ -93,8 +102,7 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
         head = tail = new Node<E>(null);
     }
 
-    // Have to override just to update the javadoc
-
+   
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
