@@ -561,7 +561,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     /**
      * Sets the value of synchronization state.
      * This operation has memory semantics of a {@code volatile} write.
-     *
      * 设置同步状态的值。此操作具有｛volatile｝写入的内存语义。
      * 
      * @param newState the new state value
@@ -575,7 +574,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * value if the current state value equals the expected value.
      * This operation has memory semantics of a {@code volatile} read
      * and write.
-     *
      * 原子化地将同步状态设置为给定的更新值，如果当前状态值等于预期值。
      * 此操作具有｛volatile｝读取的内存语义和写作。
      * 
@@ -585,11 +583,8 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      *         value was not equal to the expected value.
      */
     protected final boolean compareAndSetState(int expect, int update) {
-        // See below for intrinsics setup to support this
         return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
     }
-
-    // Queuing utilities
 
     /**
      * The number of nanoseconds for which it is faster to spin
