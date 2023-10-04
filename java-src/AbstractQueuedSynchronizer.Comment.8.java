@@ -10,7 +10,9 @@ import sun.misc.Unsafe;
  * <p>Even though this class is based on an internal FIFO queue, it
  * does not automatically enforce FIFO acquisition policies.  The core
  * of exclusive synchronization takes the form:
- *
+ * 
+ * 即使此类基于内部FIFO队列，它也不会自动执行FIFO获取策略。独占同步的核心采用以下形式：
+ * 
  * <pre>
  * Acquire:
  *     while (!tryAcquire(arg)) {
@@ -36,6 +38,12 @@ import sun.misc.Unsafe;
  * specifically designed to be used by fair synchronizers) returns
  * {@code true}.  Other variations are possible.
  *
+ * 由于获取中的检查是在排队之前调用的，因此一个新获取线程可能会在其他被阻塞和排队的线程之前阻塞。
+ * 但是，如果需要，您可以定义｛@code tryAcquire｝和/或｛@code-tryAcquireShared｝，
+ * 通过内部调用一种或多种检查方法来禁用议价，从而提供<em>公平</em>FIFO采集顺序。
+ * 特别是，如果｛hasQueuedPredessors｝（一种专门为公平同步器设计的方法）返回｛true｝，
+ * 则大多数公平同步器可以定义｛@code-tryAcquire｝返回｛@code false｝。其他变化也是可能的。
+ * 
  * <p>Throughput and scalability are generally highest for the
  * default barging (also known as <em>greedy</em>,
  * <em>renouncement</em>, and <em>convoy-avoidance</em>) strategy.
@@ -53,6 +61,15 @@ import sun.misc.Unsafe;
  * and/or {@link #hasQueuedThreads} to only do so if the synchronizer
  * is likely not to be contended.
  *
+ * 默认barging（也称为贪婪、放弃和车队规避）策略的吞吐量和可扩展性通常最高。
+ * 虽然这不能保证是公平的或无饥饿的，但允许较早排队的线程在较晚排队的线程之前进行重新保持，
+ * 并且每次重新保持都有机会成功应对传入线程。此外，acquires时不旋转；
+ * 在通常意义上，他们可以在阻塞之前执行{tryAcquire}的多次调用，并穿插其他计算。
+ * 当独占同步仅短暂保持时，这提供了旋转的大部分好处，而当不保持时，则没有大部分责任。
+ * 如果需要，您可以通过前面的调用来增强这一点，以获取具有“快速路径”检查的方法，
+ * 可能会预检查｛hasContended｝和/或｛hasQueuedThreads｝，
+ * 以便只有在同步器可能不被争用的情况下才这样做。
+ *
  * <p>This class provides an efficient and scalable basis for
  * synchronization in part by specializing its range of use to
  * synchronizers that can rely on {@code int} state, acquire, and
@@ -62,6 +79,12 @@ import sun.misc.Unsafe;
  * {@link java.util.Queue} classes, and {@link LockSupport} blocking
  * support.
  *
+ * 该类为同步提供了一个高效且可扩展的基础，部分原因是将其使用范围专门化为可以依赖{int}状态、
+ * 获取和释放参数以及内部FIFO等待队列的同步器。当这还不够时，
+ * 您可以使用｛atomic｝类、
+ * 您自己的自定义｛@link java.util.Queue｝
+ * 类和｛@linkLockSupport｝阻塞支持从较低级别构建同步器。
+ * 
  * <h3>Usage Examples</h3>
  *
  * <p>Here is a non-reentrant mutual exclusion lock class that uses
@@ -163,7 +186,7 @@ import sun.misc.Unsafe;
  * @since 1.5
  * @author Doug Lea
  */
-public abstract class AbstractQueuedSynchronizer
+public abstract class AbstractQueuedSynchronizer.Comment.8
     extends AbstractOwnableSynchronizer
     implements java.io.Serializable {
 
@@ -562,6 +585,9 @@ public abstract class AbstractQueuedSynchronizer
              * If status is negative (i.e., possibly needing signal) try
              * to clear in anticipation of signalling.  It is OK if this
              * fails or if status is changed by waiting thread.
+             *
+             * 如果状态为阴性（即，可能需要信号），则尝试清除信号。
+             * 如果失败或等待线程更改了状态，则可以。
              */
             int ws = node.waitStatus;
             if (ws < 0)
@@ -572,6 +598,9 @@ public abstract class AbstractQueuedSynchronizer
              * just the next node.  But if cancelled or apparently null,
              * traverse backwards from tail to find the actual
              * non-cancelled successor.
+             *
+             * 要取消标记的线程保存在后续节点中，后者通常只是下一个节点。
+             * 但如果被取消或明显为空，则从尾部向后遍历以找到实际的未取消的后续。
              */
             Node s = node.next;
             if (s == null || s.waitStatus > 0) {
@@ -590,6 +619,10 @@ public abstract class AbstractQueuedSynchronizer
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
      * to calling unparkSuccessor of head if it needs signal.)
+     *
+     * 共享模式的释放操作——发出后续信号并确保传播。
+     * （注意：对于独占模式，如果需要信号，
+     * 释放就相当于调用head的unparkSuccessor。）
      */
     private void doReleaseShared() {
         /*
@@ -602,6 +635,13 @@ public abstract class AbstractQueuedSynchronizer
          * while we are doing this. Also, unlike other uses of
          * unparkSuccessor, we need to know if CAS to reset status
          * fails, if so rechecking.
+         *
+         * 确保一个发布传播，即使还有其他正在进行的获取/发布。
+         * 如果需要信号，这将以通常的方式进行，尝试打开头部的继承器。
+         * 但如果没有，则将状态设置为“传播”，以确保在发布时继续传播。
+         * 此外，我们必须循环，以防在执行此操作时添加新节点。
+         * 此外，与unparkSuccessor的其他使用不同，
+         * 我们需要知道CAS重置状态是否失败，如果是，则重新检查。
          */
         for (;;) {
             Node h = head;
@@ -625,7 +665,10 @@ public abstract class AbstractQueuedSynchronizer
      * Sets head of queue, and checks if successor may be waiting
      * in shared mode, if so propagating if either propagate > 0 or
      * PROPAGATE status was set.
-     *
+     * 
+     * 设置队列头，并检查后续队列是否在共享模式下等待，
+     * 如果是，则在设置了propagate>0或propagate状态时进行传播。
+     * 
      * @param node the node
      * @param propagate the return value from a tryAcquireShared
      */
@@ -634,19 +677,30 @@ public abstract class AbstractQueuedSynchronizer
         setHead(node);
         /*
          * Try to signal next queued node if:
+         * 如果出现以下情况，请尝试发出下一个排队节点的信号：
          *   Propagation was indicated by caller,
+         *   传播由呼叫者指示，
          *     or was recorded (as h.waitStatus either before
+         *     之前记录为（作为h.waitStatus
          *     or after setHead) by a previous operation
+         *     通过以前的操作
          *     (note: this uses sign-check of waitStatus because
          *      PROPAGATE status may transition to SIGNAL.)
+         *      （注意：这使用waitStatus的符号检查，
+         *      因为PROPAGATE状态可能转换为SIGNAL。）
          * and
          *   The next node is waiting in shared mode,
+         *   下一个节点正在共享模式中等待，
          *     or we don't know, because it appears null
+         *     我们不知道，因为它看起来是空的
          *
          * The conservatism in both of these checks may cause
          * unnecessary wake-ups, but only when there are multiple
          * racing acquires/releases, so most need signals now or soon
          * anyway.
+         *
+         * 这两种检查中的保守性可能会导致不必要的唤醒，但只有当有多个比赛获取/发布时，
+         * 所以大多数人现在或很快都需要信号。
          */
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
             (h = head) == null || h.waitStatus < 0) {
@@ -671,26 +725,37 @@ public abstract class AbstractQueuedSynchronizer
         node.thread = null;
 
         // Skip cancelled predecessors
+        // 跳过已取消的前置任务
         Node pred = node.prev;
-        while (pred.waitStatus > 0)
+        while (pred.waitStatus > 0){
             node.prev = pred = pred.prev;
+        }
 
         // predNext is the apparent node to unsplice. CASes below will
         // fail if not, in which case, we lost race vs another cancel
         // or signal, so no further action is necessary.
+        //predNext是要取消拼接的明显节点。以下CASes
+        //如果没有失败，在这种情况下，我们输掉了竞争，而另一竞争取消了
+        //因此不需要进一步的动作。
         Node predNext = pred.next;
 
         // Can use unconditional write instead of CAS here.
         // After this atomic step, other Nodes can skip past us.
         // Before, we are free of interference from other threads.
+        //可以在此处使用无条件写入而不是CAS。
+        //在这个原子步骤之后，其他节点可以跳过我们。
+        //以前，我们不受其他线程的干扰。
         node.waitStatus = Node.CANCELLED;
 
         // If we are the tail, remove ourselves.
+        // 如果我们是尾节点tail，就把自己移开。
         if (node == tail && compareAndSetTail(node, pred)) {
             compareAndSetNext(pred, predNext, null);
         } else {
             // If successor needs signal, try to set pred's next-link
             // so it will get one. Otherwise wake it up to propagate.
+            // 如果继任者需要信号，请尝试设置pred的下一个链接
+            // 所以它会得到一个。否则会唤醒它进行传播。
             int ws;
             if (pred != head &&
                 ((ws = pred.waitStatus) == Node.SIGNAL ||
@@ -702,7 +767,7 @@ public abstract class AbstractQueuedSynchronizer
             } else {
                 unparkSuccessor(node);
             }
-
+            //
             node.next = node; // help GC
         }
     }
@@ -711,7 +776,10 @@ public abstract class AbstractQueuedSynchronizer
      * Checks and updates status for a node that failed to acquire.
      * Returns true if thread should block. This is the main signal
      * control in all acquire loops.  Requires that pred == node.prev.
-     *
+     * 
+     * 检查并更新无法获取的节点的状态。如果线程应该阻塞，则返回true。这是主信号
+      * 控制所有采集循环。要求pred==node.prev。
+      * 
      * @param pred node's predecessor holding status
      * @param node the node
      * @return {@code true} if thread should block
@@ -722,12 +790,14 @@ public abstract class AbstractQueuedSynchronizer
             /*
              * This node has already set status asking a release
              * to signal it, so it can safely park.
+             * 此节点已设置请求发布的状态给它发信号，这样它就可以安全地停车。
              */
             return true;
         if (ws > 0) {
             /*
              * Predecessor was cancelled. Skip over predecessors and
              * indicate retry.
+             * 前置任务已取消。跳过前置任务和指示重试。
              */
             do {
                 node.prev = pred = pred.prev;
@@ -738,6 +808,8 @@ public abstract class AbstractQueuedSynchronizer
              * waitStatus must be 0 or PROPAGATE.  Indicate that we
              * need a signal, but don't park yet.  Caller will need to
              * retry to make sure it cannot acquire before parking.
+             * waitStatus必须为0或PROPAGATE。表明我们需要信号，但不要park。呼叫者需要
+             * 请重试以确保它在park前无法获取。
              */
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
@@ -768,6 +840,9 @@ public abstract class AbstractQueuedSynchronizer
      * interactions of exception mechanics (including ensuring that we
      * cancel if tryAcquire throws exception) and other control, at
      * least not without hurting performance too much.
+     * 各种风格的acquire，在独家/共享和控制模式。每个基本上都一样，
+     * 但令人恼火不同。由于异常机制的交互作用（包括确保如果tryAcquire抛出异常，则取消）
+     * 和其他控件，位于至少在不太影响表现的情况下。
      */
 
     /**
@@ -985,6 +1060,11 @@ public abstract class AbstractQueuedSynchronizer
          * some other thread(s) concurrently performed setHead in
          * between some of our reads. We try this twice before
          * resorting to traversal.
+         * 
+         * 第一个节点通常是head.next thread字段，确保读取一致：
+         * 如果thread字段为null或s.prev不再为head，
+         * 则其他一些线程在中同时执行setHead在我们的一些阅读之间。
+         * 我们以前试过两次采用遍历。
          */
         Node h, s;
         Thread st;
@@ -1000,6 +1080,10 @@ public abstract class AbstractQueuedSynchronizer
          * is actually first node. If not, we continue on, safely
          * traversing from tail back to head to find first,
          * guaranteeing termination.
+         * 
+         * Head的下一个字段可能还没有设置，或者可能已经在setHead之后未设置。
+         * 所以我们必须检查一下尾tail实际上是第一个节点。
+         * 如果没有，我们继续，安全地从尾部向后遍历到头部以首先找到，保证终止。
          */
 
         Node t = tail;
