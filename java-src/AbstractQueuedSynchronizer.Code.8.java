@@ -6,94 +6,6 @@ import java.util.Date;
 import sun.misc.Unsafe;
 
 /**
- * Provides a framework for implementing blocking locks and related
- * synchronizers (semaphores, events, etc) that rely on
- * first-in-first-out (FIFO) wait queues.  This class is designed to
- * be a useful basis for most kinds of synchronizers that rely on a
- * single atomic {@code int} value to represent state. Subclasses
- * must define the protected methods that change this state, and which
- * define what that state means in terms of this object being acquired
- * or released.  Given these, the other methods in this class carry
- * out all queuing and blocking mechanics. Subclasses can maintain
- * other state fields, but only the atomically updated {@code int}
- * value manipulated using methods {@link #getState}, {@link
- * #setState} and {@link #compareAndSetState} is tracked with respect
- * to synchronization.
- *
- * <p>Subclasses should be defined as non-public internal helper
- * classes that are used to implement the synchronization properties
- * of their enclosing class.  Class
- * {@code AbstractQueuedSynchronizer} does not implement any
- * synchronization interface.  Instead it defines methods such as
- * {@link #acquireInterruptibly} that can be invoked as
- * appropriate by concrete locks and related synchronizers to
- * implement their public methods.
- *
- * <p>This class supports either or both a default <em>exclusive</em>
- * mode and a <em>shared</em> mode. When acquired in exclusive mode,
- * attempted acquires by other threads cannot succeed. Shared mode
- * acquires by multiple threads may (but need not) succeed. This class
- * does not &quot;understand&quot; these differences except in the
- * mechanical sense that when a shared mode acquire succeeds, the next
- * waiting thread (if one exists) must also determine whether it can
- * acquire as well. Threads waiting in the different modes share the
- * same FIFO queue. Usually, implementation subclasses support only
- * one of these modes, but both can come into play for example in a
- * {@link ReadWriteLock}. Subclasses that support only exclusive or
- * only shared modes need not define the methods supporting the unused mode.
- *
- * <p>This class defines a nested {@link ConditionObject} class that
- * can be used as a {@link Condition} implementation by subclasses
- * supporting exclusive mode for which method {@link
- * #isHeldExclusively} reports whether synchronization is exclusively
- * held with respect to the current thread, method {@link #release}
- * invoked with the current {@link #getState} value fully releases
- * this object, and {@link #acquire}, given this saved state value,
- * eventually restores this object to its previous acquired state.  No
- * {@code AbstractQueuedSynchronizer} method otherwise creates such a
- * condition, so if this constraint cannot be met, do not use it.  The
- * behavior of {@link ConditionObject} depends of course on the
- * semantics of its synchronizer implementation.
- *
- * <p>This class provides inspection, instrumentation, and monitoring
- * methods for the internal queue, as well as similar methods for
- * condition objects. These can be exported as desired into classes
- * using an {@code AbstractQueuedSynchronizer} for their
- * synchronization mechanics.
- *
- * <p>Serialization of this class stores only the underlying atomic
- * integer maintaining state, so deserialized objects have empty
- * thread queues. Typical subclasses requiring serializability will
- * define a {@code readObject} method that restores this to a known
- * initial state upon deserialization.
- *
- * <h3>Usage</h3>
- *
- * <p>To use this class as the basis of a synchronizer, redefine the
- * following methods, as applicable, by inspecting and/or modifying
- * the synchronization state using {@link #getState}, {@link
- * #setState} and/or {@link #compareAndSetState}:
- *
- * <ul>
- * <li> {@link #tryAcquire}
- * <li> {@link #tryRelease}
- * <li> {@link #tryAcquireShared}
- * <li> {@link #tryReleaseShared}
- * <li> {@link #isHeldExclusively}
- * </ul>
- *
- * Each of these methods by default throws {@link
- * UnsupportedOperationException}.  Implementations of these methods
- * must be internally thread-safe, and should in general be short and
- * not block. Defining these methods is the <em>only</em> supported
- * means of using this class. All other methods are declared
- * {@code final} because they cannot be independently varied.
- *
- * <p>You may also find the inherited methods from {@link
- * AbstractOwnableSynchronizer} useful to keep track of the thread
- * owning an exclusive synchronizer.  You are encouraged to use them
- * -- this enables monitoring and diagnostic tools to assist users in
- * determining which threads hold locks.
  *
  * <p>Even though this class is based on an internal FIFO queue, it
  * does not automatically enforce FIFO acquisition policies.  The core
@@ -281,8 +193,23 @@ public abstract class AbstractQueuedSynchronizer
      * it only gives the right to contend.  So the currently released
      * contender thread may need to rewait.
      *
-     * <p>To enqueue into a CLH lock, you atomically splice it in as new
-     * tail. To dequeue, you just set the head field.
+     * 等待队列是“CLH”（Craig、Landin和Hagersten）锁定队列的变体。
+     * CLH锁通常用于自旋锁spinlocks。
+     * 相反，我们将它们用于阻塞同步器，但使用相同的基本策略，
+     * 即在其节点的前继节点中保留有关线程的一些控制信息。
+     * 每个节点中的“状态status”字段跟踪线程是否应该阻塞。
+     * 当节点的前一个释放时，节点会发出信号。
+     * 否则，队列的每个节点都充当一个特定的通知样式监视器，其中包含一个等待线程。
+     *
+     * 状态status字段并不控制线程是否被授予锁等。
+     * 线程可能会尝试获取它是否是队列中的第一个线程。
+     * 但成为第一并不能保证成功；它只赋予了争用的权利。
+     * 因此，目前发布的竞争者线程可能需要重新等待。
+     *
+     * To enqueue into a CLH lock, you atomically splice it in as new tail.
+     * 将其排入CLH锁，然后将其原子性地拼接为新的尾部tail。
+     * To dequeue, you just set the head field.
+     * 要退出队列，只需设置head字段。
      * <pre>
      *      +------+  prev +-----+       +-----+
      * head |      | <---- |     | <---- |     |  tail
@@ -297,11 +224,20 @@ public abstract class AbstractQueuedSynchronizer
      * in part to deal with possible cancellation due to timeouts
      * and interrupts.
      *
+     * 插入CLH队列只需要在“tail”上执行单个原子操作，因此从未排队到排队有一个简单的原子分界点。
+     * 同样，出列只涉及更新“头”。
+     * 然而，节点需要做更多的工作来确定他们的后继，部分原因是要处理由于超时和中断可能导致的取消。
+     * 
      * <p>The "prev" links (not used in original CLH locks), are mainly
      * needed to handle cancellation. If a node is cancelled, its
      * successor is (normally) relinked to a non-cancelled
      * predecessor. For explanation of similar mechanics in the case
      * of spin locks, see the papers by Scott and Scherer at
+     * http://www.cs.rochester.edu/u/scott/synchronization/
+     *
+     * “prev”链接（不用于原始CLH锁），主要用于处理取消。
+     * 如果节点被取消，则其后续节点（通常）会重新链接到未取消的前置节点。
+     * 关于自旋锁情况下的解释，请参阅Scott和Scherer在
      * http://www.cs.rochester.edu/u/scott/synchronization/
      *
      * <p>We also use "next" links to implement blocking mechanics.
@@ -315,6 +251,12 @@ public abstract class AbstractQueuedSynchronizer
      * (Or, said differently, the next-links are an optimization
      * so that we don't usually need a backward scan.)
      *
+     * 我们还使用“next”链接来实现阻塞机制。每个节点的线程id都保存在自己的节点中，
+     * 因此前置节点通过遍历下一个链接来确定它是哪个线程，从而向下一个节点发出唤醒信号。
+     * 确定后续节点必须避免与新排队的节点竞争，以设置其前置节点的“下一个”字段。
+     * 必要时，当节点的后续节点显示为null时，通过从原子更新的“尾部”向后检查来解决此问题。
+     * （或者，换言之，下一个链接是一个优化，这样我们通常不需要反向扫描。）
+     * 
      * <p>Cancellation introduces some conservatism to the basic
      * algorithms.  Since we must poll for cancellation of other
      * nodes, we can miss noticing whether a cancelled node is
@@ -323,12 +265,21 @@ public abstract class AbstractQueuedSynchronizer
      * a new predecessor, unless we can identify an uncancelled
      * predecessor who will carry this responsibility.
      *
+     * 取消为基本算法引入了一些保守性。由于我们必须轮询其他节点的取消，
+     * 我们可能会忽略被取消的节点是在我们前面还是后面。
+     * 这是通过在取消时总是取消对后继者的标记来处理的，允许他们稳定在新的前任上，
+     * 除非我们能确定一个将承担这一责任的未被取消的前继。
+     * 
      * <p>CLH queues need a dummy header node to get started. But
      * we don't create them on construction, because it would be wasted
      * effort if there is never contention. Instead, the node
      * is constructed and head and tail pointers are set upon first
      * contention.
-     *
+     * 
+     * CLH队列需要一个伪头节点才能启动。但我们不会在构造方法中创造它们，
+     * 因为如果从来没有争论，那将是浪费精力。
+     * 相反，构造节点，并在第一次争用时设置头指针和尾指针。
+     * 
      * <p>Threads waiting on Conditions use the same nodes, but
      * use an additional link. Conditions only need to link nodes
      * in simple (non-concurrent) linked queues because they are
@@ -337,6 +288,11 @@ public abstract class AbstractQueuedSynchronizer
      * transferred to the main queue.  A special value of status
      * field is used to mark which queue a node is on.
      *
+     * 在Conditions上等待的线程使用相同的节点，但使用额外的链接。
+     * 条件只需要链接简单（非并发）链接队列中的节点，因为它们只有在独占时才能访问。
+     * 在等待时，一个节点被插入到一个条件队列中。
+     * 发出信号后，节点被转移到主队列。状态字段的一个特殊值用于标记节点所在的队列。
+     * 
      * <p>Thanks go to Dave Dice, Mark Moir, Victor Luchangco, Bill
      * Scherer and Michael Scott, along with members of JSR-166
      * expert group, for helpful ideas, discussions, and critiques
