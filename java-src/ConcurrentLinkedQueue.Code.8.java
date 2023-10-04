@@ -93,46 +93,7 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
         head = tail = new Node<E>(null);
     }
 
-    /**
-     * Creates a {@code ConcurrentLinkedQueue}
-     * initially containing the elements of the given collection,
-     * added in traversal order of the collection's iterator.
-     *
-     * @param c the collection of elements to initially contain
-     * @throws NullPointerException if the specified collection or any
-     *         of its elements are null
-     */
-    public ConcurrentLinkedQueue(Collection<? extends E> c) {
-        Node<E> h = null, t = null;
-        for (E e : c) {
-            checkNotNull(e);
-            Node<E> newNode = new Node<E>(e);
-            if (h == null)
-                h = t = newNode;
-            else {
-                t.lazySetNext(newNode);
-                t = newNode;
-            }
-        }
-        if (h == null)
-            h = t = new Node<E>(null);
-        head = h;
-        tail = t;
-    }
-
     // Have to override just to update the javadoc
-
-    /**
-     * Inserts the specified element at the tail of this queue.
-     * As the queue is unbounded, this method will never throw
-     * {@link IllegalStateException} or return {@code false}.
-     *
-     * @return {@code true} (as specified by {@link Collection#add})
-     * @throws NullPointerException if the specified element is null
-     */
-    public boolean add(E e) {
-        return offer(e);
-    }
 
     /**
      * Tries to CAS head to p. If successful, repoint old head to itself
@@ -141,16 +102,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     final void updateHead(Node<E> h, Node<E> p) {
         if (h != p && casHead(h, p))
             h.lazySetNext(h);
-    }
-
-    /**
-     * Returns the successor of p, or the head node if p.next has been
-     * linked to self, which will only be true if traversing with a
-     * stale pointer that is now off the list.
-     */
-    final Node<E> succ(Node<E> p) {
-        Node<E> next = p.next;
-        return (p == next) ? head : next;
     }
 
     /**
@@ -257,6 +208,29 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
         }
     }
 
+    
+    /**
+     * Inserts the specified element at the tail of this queue.
+     * As the queue is unbounded, this method will never throw
+     * {@link IllegalStateException} or return {@code false}.
+     *
+     * @return {@code true} (as specified by {@link Collection#add})
+     * @throws NullPointerException if the specified element is null
+     */
+    public boolean add(E e) {
+        return offer(e);
+    }
+    
+    /**
+     * Returns the successor of p, or the head node if p.next has been
+     * linked to self, which will only be true if traversing with a
+     * stale pointer that is now off the list.
+     */
+    final Node<E> succ(Node<E> p) {
+        Node<E> next = p.next;
+        return (p == next) ? head : next;
+    }
+    
     /**
      * Returns {@code true} if this queue contains no elements.
      *
