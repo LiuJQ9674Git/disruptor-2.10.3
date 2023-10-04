@@ -79,11 +79,12 @@ import sun.misc.Unsafe;
  * {@link java.util.Queue} classes, and {@link LockSupport} blocking
  * support.
  *
- * 该类为同步提供了一个高效且可扩展的基础，部分原因是将其使用范围专门化为可以依赖{int}状态、
- * 获取和释放参数以及内部FIFO等待队列的同步器。当这还不够时，
- * 您可以使用｛atomic｝类、
- * 您自己的自定义｛@link java.util.Queue｝
- * 类和｛@linkLockSupport｝阻塞支持从较低级别构建同步器。
+ * 该类为同步提供了一个高效且可扩展的基础，部分原因是将其使用范围专门化为可以依赖
+ * 初始化状态（state）、获取acquire和释放release的参数，
+ * 以及内部FIFO等待队列的同步器。
+ * 
+ * 当这还不够时，您可以使用｛atomic｝类｛java.util.Queue｝类和｛LockSupport｝
+ * 阻塞支持从较低级别构建同步器。
  * 
  * <h3>Usage Examples</h3>
  *
@@ -203,28 +204,31 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Hagersten) lock queue. CLH locks are normally used for
      * spinlocks.  We instead use them for blocking synchronizers, but
      * use the same basic tactic of holding some of the control
-     * information about a thread in the predecessor of its node.  A
-     * "status" field in each node keeps track of whether a thread
+     * information about a thread in the predecessor of its node.
+     *
+     * 等待队列是“CLH”（Craig、Landin和Hagersten）锁队列的变体。
+     * CLH锁通常用于自旋锁spinlocks。我们将它们用于阻塞同步器，但使用相同的基本策略，
+     * 即在其节点的前继节点中保留有关线程的一些控制信息。
+     * 
+     * A "status" field in each node keeps track of whether a thread
      * should block.  A node is signalled when its predecessor
      * releases.  Each node of the queue otherwise serves as a
      * specific-notification-style monitor holding a single waiting
-     * thread. The status field does NOT control whether threads are
+     * thread.
+     *
+     * 每个节点中的“状态status”字段跟踪线程是否应该阻塞。
+     * 当节点的前一个释放releases时，节点会发出（释放阻塞）信号。
+     * 否则，队列的每个节点都充当一个特定的通知样式监视器，其中包含一个等待线程。
+     * 
+     * The status field does NOT control whether threads are
      * granted locks etc though.  A thread may try to acquire if it is
      * first in the queue. But being first does not guarantee success;
      * it only gives the right to contend.  So the currently released
      * contender thread may need to rewait.
-     *
-     * 等待队列是“CLH”（Craig、Landin和Hagersten）锁定队列的变体。
-     * CLH锁通常用于自旋锁spinlocks。
-     * 相反，我们将它们用于阻塞同步器，但使用相同的基本策略，
-     * 即在其节点的前继节点中保留有关线程的一些控制信息。
-     * 每个节点中的“状态status”字段跟踪线程是否应该阻塞。
-     * 当节点的前一个释放时，节点会发出信号。
-     * 否则，队列的每个节点都充当一个特定的通知样式监视器，其中包含一个等待线程。
-     *
+     * 
      * 状态status字段并不控制线程是否被授予锁等。
-     * 线程可能会尝试获取它是否是队列中的第一个线程。
-     * 但成为第一并不能保证成功；它只赋予了争用的权利。
+     * 如果node/thread是第一个节点，那么线程尝试获取锁（许可、资质）
+     * 但它只赋予了争用的权利，不能保证成功；
      * 因此，目前发布的竞争者线程可能需要重新等待。
      *
      * To enqueue into a CLH lock, you atomically splice it in as new tail.
@@ -263,19 +267,22 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * We also use "next" links to implement blocking mechanics.
      * The thread id for each node is kept in its own node, so a
      * predecessor signals the next node to wake up by traversing
-     * next link to determine which thread it is.  Determination of
+     * next link to determine which thread it is.
+     *
+     * 我们还使用“next”链接来实现阻塞机制。每个节点的线程id都保存在自己的节点中，
+     * 因此前置节点通过遍历下一个链接来确定它是哪个线程，从而向下一个节点发出唤醒信号。
+     * 
+     * Determination of
      * successor must avoid races with newly queued nodes to set
      * the "next" fields of their predecessors.  This is solved
      * when necessary by checking backwards from the atomically
      * updated "tail" when a node's successor appears to be null.
      * (Or, said differently, the next-links are an optimization
      * so that we don't usually need a backward scan.)
-     *
-     * 我们还使用“next”链接来实现阻塞机制。每个节点的线程id都保存在自己的节点中，
-     * 因此前置节点通过遍历下一个链接来确定它是哪个线程，从而向下一个节点发出唤醒信号。
-     * 确定后续节点必须避免与新排队的节点竞争，以设置其前置节点的“下一个”字段。
-     * 必要时，当节点的后续节点显示为null时，通过从原子更新的“尾部”向后检查来解决此问题。
-     * （或者，换言之，下一个链接是一个优化，这样我们通常不需要反向扫描。）
+     * 
+     * 确定后续节点必须避免与新排队的节点竞争，以设置其前置节点的“下一个next”字段。
+     * 必要时，当节点的后续节点显示为null时，通过从原子更新的“尾节点tail”向后检查来解决此问题。
+     * （或者，换言之，下一个链接是一个优化，这样我们通常不需要反向扫描scan。）
      * 
      * Cancellation introduces some conservatism to the basic
      * algorithms.  Since we must poll for cancellation of other
@@ -297,7 +304,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * contention.
      * 
      * CLH队列需要一个伪头节点才能启动。但我们不会在构造方法中创造它们，
-     * 因为如果从来没有争论，那将是浪费精力。
+     * 因为如果从来没有争用，那将是浪费精力。
      * 相反，构造节点，并在第一次争用时设置头指针和尾指针。
      * 
      * Threads waiting on Conditions use the same nodes, but
@@ -409,7 +416,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * (or when possible, unconditional volatile writes).
          *
          * 对于正常同步节点，该字段初始化为0，并且条件节点的CONDITION。
-         * 使用CAS进行修改（或者在可能的情况下，无条件的易失性写入）。
+         * 使用CAS进行修改（或者在可能的情况下，无条件的volatile写入）。
          */
         volatile int waitStatus;
 
@@ -445,11 +452,15 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * point to the node itself instead of null, to make life
          * easier for isOnSyncQueue.
          *
-         * 链接到当前节点/线程所在的后续节点发布时取消标记。排队时分配，
-         * 已调整绕过已取消的前置任务，并为其清空时（对于为了GC）。
-         * enq操作不会分配前任的下一个字段直到附着之后，所以看到下一个字段为空并不一定意味着节点
-         * 在队列的末尾。但是，如果出现下一个字段要为null，我们可以从尾部扫描prev仔细检查。
-         * 取消节点的下一个字段设置为指向节点本身而不是null，以创建生命isOnSyncQueue更容易。
+         * 链接到当前节点/线程所在的后续节点发布release时取消阻塞unpark。
+         * 排队时分配，已调整绕过已取消的前置任务，当出队时将其清空时（对于为了GC）。
+         * 
+         * enq操作不会分配前任的下一个字段直到以后设置此值，
+         * 所以看到下一个next字段为空并不一定意味着节点
+         * 在队列的末尾。但是，如果出现下一个next字段要为null，
+         * 我们可以从尾节点tail开始遍历prev，并使用double-check。
+         * 取消节点的下一个next字段设置为指向节点本身而不是null，
+         * 以创建生命isOnSyncQueue更容易。
          */
         volatile Node next;
 
@@ -471,9 +482,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * we save a field by using special value to indicate shared
          * mode.
          *
-         * 链接到等待条件下的下一个节点，或特殊值SHARED。
+         * 链接到等待条件下的下一个next节点，或特殊值SHARED。
          * 因为仅访问条件队列在独占模式下持有时，我们只需要链接队列以在节点等待时容纳节点条件。
-         * 然后将它们转移到队列中重新获取许可re-acquire。因为条件只能是排他性的，
+         * 然后将它们转移到队列中重新获取许可（re-acquire）。因为条件只能是排他性的，
          * 我们通过使用特殊值来保存字段以表示共享模式。
          */
         Node nextWaiter;
@@ -525,8 +536,8 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     private transient volatile Node head;
 
     /**
-     * Tail of the wait queue, lazily initialized.  Modified only via
-     * method enq to add new wait node.
+     * Tail of the wait queue, lazily initialized.
+     * Modified only via method enq to add new wait node.
      *
      * 等待队列的尾部，已延迟初始化。仅通过修改方法enq添加新的等待节点。
      */
