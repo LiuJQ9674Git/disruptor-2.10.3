@@ -60,8 +60,7 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     /**
      * A node from which the first live (non-deleted) node (if any)
      * can be reached in O(1) time.
-     * 不变量
-     * Invariants:
+     * Invariants 不变量:
      * - all live nodes are reachable from head via succ()
      *   所有活动节点都可以通过succ（）从头访问
      * - head != null
