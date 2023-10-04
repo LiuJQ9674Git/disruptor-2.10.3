@@ -725,7 +725,6 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
 
         /**
          * Tries to artificially match a data node -- used by remove.
-         * 
          * 尝试人为地匹配数据节点--由remove使用。
          */
         final boolean tryMatchData() {
