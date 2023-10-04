@@ -98,7 +98,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
         head = tail = new Node<E>(null);
     }
 
-   
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
