@@ -96,15 +96,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     // Have to override just to update the javadoc
 
     /**
-     * Tries to CAS head to p. If successful, repoint old head to itself
-     * as sentinel for succ(), below.
-     */
-    final void updateHead(Node<E> h, Node<E> p) {
-        if (h != p && casHead(h, p))
-            h.lazySetNext(h);
-    }
-
-    /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
      *
@@ -209,6 +200,15 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     }
 
     
+    /**
+     * Tries to CAS head to p. If successful, repoint old head to itself
+     * as sentinel for succ(), below.
+     */
+    final void updateHead(Node<E> h, Node<E> p) {
+        if (h != p && casHead(h, p))
+            h.lazySetNext(h);
+    }
+
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never throw
