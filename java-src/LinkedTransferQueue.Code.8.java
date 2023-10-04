@@ -135,6 +135,7 @@ public class LinkedTransferQueue.Code.8<E> extends AbstractQueue<E>
         }
     }
 
+    
     /** head of the queue; null until first enqueue */
     transient volatile Node head;
 
