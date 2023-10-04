@@ -750,7 +750,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Sets head of queue, and checks if successor may be waiting
      * in shared mode, if so propagating if either propagate > 0 or
      * PROPAGATE status was set.
-     * 
      * 设置队列头，并检查后续队列是否在共享模式下等待，
      * 如果是，则在设置了propagate>0或propagate状态时进行传播。
      * 
@@ -795,15 +794,15 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         }
     }
 
-    // Utilities for various versions of acquire
     private void cancelAcquire(Node node) {
         // Ignore if node doesn't exist
         if (node == null){
             return;
         }
+        
         node.thread = null;
-        // Skip cancelled predecessors
-        // 跳过已取消的前置任务
+        // Skip cancelled predecessors  跳过已取消的前置任务
+        
         Node pred = node.prev;
         while (pred.waitStatus > 0){
             node.prev = pred = pred.prev;
