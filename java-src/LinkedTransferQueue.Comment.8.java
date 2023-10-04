@@ -805,6 +805,23 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
     }
 
     /**
+     * Returns spin/yield value for a node with given predecessor and
+     * data mode. See above for explanation.
+     * 返回具有给定前置任务和数据模式的节点的旋转spin/让步yield。
+     */
+    private static int spinsFor(Node pred, boolean haveData) {
+        if (MP && pred != null) {
+            if (pred.isData != haveData)      // phase change
+                return FRONT_SPINS + CHAINED_SPINS;
+            if (pred.isMatched())             // probably at front
+                return FRONT_SPINS;
+            if (pred.waiter == null)          // pred apparently spinning
+                return CHAINED_SPINS;
+        }
+        return 0;
+    }
+    
+    /**
      * Implements all queuing methods. See above for explanation.
      * 实现所有排队方法。请参阅上面的说明。
      * 
@@ -982,22 +999,6 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
         }
     }
 
-    /**
-     * Returns spin/yield value for a node with given predecessor and
-     * data mode. See above for explanation.
-     * 返回具有给定前置任务和数据模式的节点的旋转spin/让步yield。
-     */
-    private static int spinsFor(Node pred, boolean haveData) {
-        if (MP && pred != null) {
-            if (pred.isData != haveData)      // phase change
-                return FRONT_SPINS + CHAINED_SPINS;
-            if (pred.isMatched())             // probably at front
-                return FRONT_SPINS;
-            if (pred.waiter == null)          // pred apparently spinning
-                return CHAINED_SPINS;
-        }
-        return 0;
-    }
 
     /* -------------- Removal methods -------------- */
 
