@@ -796,19 +796,12 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     // Utilities for various versions of acquire
-
-    /**
-     * Cancels an ongoing attempt to acquire.
-     *
-     * @param node the node
-     */
     private void cancelAcquire(Node node) {
         // Ignore if node doesn't exist
-        if (node == null)
+        if (node == null){
             return;
-
+        }
         node.thread = null;
-
         // Skip cancelled predecessors
         // 跳过已取消的前置任务
         Node pred = node.prev;
@@ -853,7 +846,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             } else {
                 unparkSuccessor(node);
             }
-            //
             node.next = node; // help GC
         }
     }
