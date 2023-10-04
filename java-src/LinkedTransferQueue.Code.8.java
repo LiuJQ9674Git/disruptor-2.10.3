@@ -15,7 +15,6 @@ public class LinkedTransferQueue.Code.8<E> extends AbstractQueue<E>
     implements TransferQueue<E>, java.io.Serializable {
     private static final long serialVersionUID = -3223113410248163686L;
 
-
     /** True if on multiprocessor */
     private static final boolean MP =
         Runtime.getRuntime().availableProcessors() > 1;

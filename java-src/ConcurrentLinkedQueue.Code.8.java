@@ -39,7 +39,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
         }
 
         // Unsafe mechanics
-
         private static final sun.misc.Unsafe UNSAFE;
         private static final long itemOffset;
         private static final long nextOffset;
@@ -95,9 +94,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
      */
     private transient volatile Node<E> tail;
 
-    /**
-     * Creates a {@code ConcurrentLinkedQueue} that is initially empty.
-     */
     public ConcurrentLinkedQueue() {
         head = tail = new Node<E>(null);
     }
@@ -106,7 +102,6 @@ public class ConcurrentLinkedQueue.Code.8<E> extends AbstractQueue<E>
     /**
      * Inserts the specified element at the tail of this queue.
      * As the queue is unbounded, this method will never return {@code false}.
-     *
      * @return {@code true} (as specified by {@link Queue#offer})
      * @throws NullPointerException if the specified element is null
      */
