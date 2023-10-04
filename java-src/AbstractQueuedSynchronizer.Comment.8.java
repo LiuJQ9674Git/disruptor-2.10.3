@@ -546,7 +546,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     /**
      * Returns the current value of synchronization state.
      * This operation has memory semantics of a {@code volatile} read.
-     *
      * 返回同步状态的当前值。此操作具有｛@code volatile｝读取的内存语义。
      * 
      * @return current state value
@@ -559,7 +558,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Sets the value of synchronization state.
      * This operation has memory semantics of a {@code volatile} write.
      * 设置同步状态的值。此操作具有｛volatile｝写入的内存语义。
-     * 
      * @param newState the new state value
      */
     protected final void setState(int newState) {
@@ -573,7 +571,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * and write.
      * 原子化地将同步状态设置为给定的更新值，如果当前状态值等于预期值。
      * 此操作具有｛volatile｝读取的内存语义和写作。
-     * 
      * @param expect the expected value
      * @param update the new value
      * @return {@code true} if successful. False return indicates that the actual
@@ -583,8 +580,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
     }
 
-    /**
-     * The number of nanoseconds for which it is faster to spin
+    /**The number of nanoseconds for which it is faster to spin
      * rather than to use timed park. A rough estimate suffices
      * to improve responsiveness with very short timeouts.
      */
@@ -1292,120 +1288,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return h != t &&
             ((s = h.next) == null || s.thread != Thread.currentThread());
     }
-
-
-    // Instrumentation and monitoring methods
-
-    /**
-     * Returns an estimate of the number of threads waiting to
-     * acquire.  The value is only an estimate because the number of
-     * threads may change dynamically while this method traverses
-     * internal data structures.  This method is designed for use in
-     * monitoring system state, not for synchronization
-     * control.
-     *
-     * 返回等待的线程数的估计值。该值只是一个估计值，因为当该方法遍历时，
-     * 线程可能会动态更改内部数据结构。
-     * 此方法设计用于监视系统状态，不用于同步控制。
-     *
-     * @return the estimated number of threads waiting to acquire
-     */
-    public final int getQueueLength() {
-        int n = 0;
-        for (Node p = tail; p != null; p = p.prev) {
-            if (p.thread != null)
-                ++n;
-        }
-        return n;
-    }
-
-    /**
-     * Returns a collection containing threads that may be waiting to
-     * acquire.  Because the actual set of threads may change
-     * dynamically while constructing this result, the returned
-     * collection is only a best-effort estimate.  The elements of the
-     * returned collection are in no particular order.  This method is
-     * designed to facilitate construction of subclasses that provide
-     * more extensive monitoring facilities.
-     *
-     * 返回包含可能正在等待的线程的集合。因为实际的线程集可能会发生变化在构造此结果时
-     * 只是一个最大努力的估计。返回的集合没有特殊的顺序。
-     * 这种方法是旨在促进子类的构建更广泛的监测设施。
-     *
-     * @return the collection of threads
-     */
-    public final Collection<Thread> getQueuedThreads() {
-        ArrayList<Thread> list = new ArrayList<Thread>();
-        for (Node p = tail; p != null; p = p.prev) {
-            Thread t = p.thread;
-            if (t != null)
-                list.add(t);
-        }
-        return list;
-    }
-
-    /**
-     * Returns a collection containing threads that may be waiting to
-     * acquire in exclusive mode. This has the same properties
-     * as {@link #getQueuedThreads} except that it only returns
-     * those threads waiting due to an exclusive acquire.
-     *
-     * @return the collection of threads
-     */
-    public final Collection<Thread> getExclusiveQueuedThreads() {
-        ArrayList<Thread> list = new ArrayList<Thread>();
-        for (Node p = tail; p != null; p = p.prev) {
-            if (!p.isShared()) {
-                Thread t = p.thread;
-                if (t != null)
-                    list.add(t);
-            }
-        }
-        return list;
-    }
-
-    /**
-     * Returns a collection containing threads that may be waiting to
-     * acquire in shared mode. This has the same properties
-     * as {@link #getQueuedThreads} except that it only returns
-     * those threads waiting due to a shared acquire.
-     *
-     * 返回包含可能正在等待的线程的集合以共享模式获取。
-     * 它具有相同的属性作为{getQueuedThreads}，除了它只返回那些由于共享获取而等待的线程。
-     * 
-     * @return the collection of threads
-     */
-    public final Collection<Thread> getSharedQueuedThreads() {
-        ArrayList<Thread> list = new ArrayList<Thread>();
-        for (Node p = tail; p != null; p = p.prev) {
-            if (p.isShared()) {
-                Thread t = p.thread;
-                if (t != null)
-                    list.add(t);
-            }
-        }
-        return list;
-    }
-
-    /**
-     * Returns a string identifying this synchronizer, as well as its state.
-     * The state, in brackets, includes the String {@code "State ="}
-     * followed by the current value of {@link #getState}, and either
-     * {@code "nonempty"} or {@code "empty"} depending on whether the
-     * queue is empty.
-     *
-     * 返回标识此同步器及其状态的字符串。括号中的状态包括字符串｛“state=”｝
-     * 后跟{getState}的当前值，并且根据队列为空。
-     * 
-     * @return a string identifying this synchronizer, as well as its state
-     */
-    public String toString() {
-        int s = getState();
-        String q  = hasQueuedThreads() ? "non" : "";
-        return super.toString() +
-            "[State = " + s + ", " + q + "empty queue]";
-    }
-
+    //
     private static final Unsafe unsafe = Unsafe.getUnsafe();
     private static final long stateOffset;
     private static final long headOffset;
