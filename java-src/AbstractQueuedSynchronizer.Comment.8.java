@@ -515,9 +515,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
                 return p;
         }
 
-        Node() {    // Used to establish initial head or SHARED marker
-        }
-
         Node(Thread thread, Node mode) {     // Used by addWaiter
             this.nextWaiter = mode;
             this.thread = thread;
