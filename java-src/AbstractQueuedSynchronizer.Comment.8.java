@@ -532,7 +532,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     /**
      * Tail of the wait queue, lazily initialized.
      * Modified only via method enq to add new wait node.
-     *
+    
      * 等待队列的尾部，已延迟初始化。仅通过修改方法enq添加新的等待节点。
      */
     private transient volatile Node tail;
@@ -616,9 +616,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
 
     /**
      * Creates and enqueues node for current thread and given mode.
-     * 
      * 线程写入队列/没有执行park
-     * 
      * @param mode Node.EXCLUSIVE for exclusive, Node.SHARED for shared
      * @return the new node
      */
@@ -638,14 +636,11 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return node;
     }
 
-    /**
-     * Sets head of queue to be node, thus dequeuing. Called only by
+    /**Sets head of queue to be node, thus dequeuing. Called only by
      * acquire methods.  Also nulls out unused fields for sake of GC
      * and to suppress unnecessary signals and traversals.
-     *
      * 将队列的头设置为节点，从而出列。仅由调用获取方法。
      * 为了GC，还将未使用的字段清空并且抑制不必要的信号和遍历。
-     *
      * @param node the node
      */
     private void setHead(Node node) {
@@ -656,7 +651,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
 
     /**
      * Wakes up node's successor, if one exists.
+     * 
      * release是否锁方法调用
+     * 
      * @param node the node
      */
     private void unparkSuccessor(Node node) {
@@ -669,8 +666,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
              * 如果失败或等待线程更改了状态，则可以。
              */
             int ws = node.waitStatus;
-            if (ws < 0)
+            if (ws < 0){
                 compareAndSetWaitStatus(node, ws, 0);
+            }
     
             /*
              * Thread to unpark is held in successor, which is normally
@@ -685,9 +683,11 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             if (s == null || s.waitStatus > 0) {
                 s = null;
                 for (Node t = tail; t != null && t != node; t = t.prev)
-                    if (t.waitStatus <= 0)
+                    if (t.waitStatus <= 0){
                         s = t;
+                    }
             }
+            //
             if (s != null){
                 LockSupport.unpark(s.thread);
             }
@@ -698,8 +698,10 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
      * to calling unparkSuccessor of head if it needs signal.)
+     * 
      * 共享模式的释放操作——发出后续信号并确保传播。
      * （注意：对于独占模式，如果需要信号，
+     * 
      * 释放就相当于调用head的unparkSuccessor。）
      */
     private void doReleaseShared() {
@@ -713,6 +715,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * while we are doing this. Also, unlike other uses of
          * unparkSuccessor, we need to know if CAS to reset status
          * fails, if so rechecking.
+         * 
          * 确保一个发布传播，即使还有其他正在进行的获取/发布。
          * 如果需要信号，这将以通常的方式进行，尝试打开头部的继承器。
          * 但如果没有，则将状态设置为“传播”，以确保在发布时继续传播。
@@ -742,8 +745,10 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Sets head of queue, and checks if successor may be waiting
      * in shared mode, if so propagating if either propagate > 0 or
      * PROPAGATE status was set.
+     * 
      * 设置队列头，并检查后续队列是否在共享模式下等待，
      * 如果是，则在设置了propagate>0或propagate状态时进行传播。
+     * 
      * @param node the node
      * @param propagate the return value from a tryAcquireShared
      */
