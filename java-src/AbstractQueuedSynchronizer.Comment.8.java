@@ -588,6 +588,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
 
     /**
      * Inserts node into queue, initializing if necessary. See picture above.
+     * 
      * 将节点插入队列，必要时进行初始化。
      * 
      * @param node the node to insert
@@ -596,12 +597,16 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     private Node enq(final Node node) {
         for (;;) {
             Node t = tail;
+            // 安全检查
             if (t == null) { // Must initialize
-                if (compareAndSetHead(new Node()))
+                if (compareAndSetHead(new Node())){
                     tail = head;
+                }
             } else {
+                // 前继指针节点设置 t在node前面 t n
                 node.prev = t;
                 if (compareAndSetTail(t, node)) {
+                    // 后继指针 t.next=n n.pre =t
                     t.next = node;
                     return t;
                 }
@@ -611,6 +616,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
 
     /**
      * Creates and enqueues node for current thread and given mode.
+     * 
      * 线程写入队列/没有执行park
      * 
      * @param mode Node.EXCLUSIVE for exclusive, Node.SHARED for shared
