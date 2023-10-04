@@ -454,7 +454,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          *
          * 链接到当前节点/线程所在的后续节点发布release时取消阻塞unpark。
          * 排队时分配，已调整绕过已取消的前置任务，当出队时将其清空时（对于为了GC）。
-         * 
          * enq操作不会分配前任的下一个字段直到以后设置此值，
          * 所以看到下一个next字段为空并不一定意味着节点
          * 在队列的末尾。但是，如果出现下一个next字段要为null，
@@ -501,10 +500,8 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * Returns previous node, or throws NullPointerException if null.
          * Use when predecessor cannot be null.  The null check could
          * be elided, but is present to help the VM.
-         *
          * 返回上一个节点，如果为null则抛出NullPointerException。
          * 前置任务不能为null时使用。空检查可能被忽略，但存在是为了帮助VM。
-         *
          * @return the predecessor of this node
          */
         final Node predecessor() throws NullPointerException {
