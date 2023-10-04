@@ -47,7 +47,7 @@ import java.util.function.Consumer;
  * <em>optional</em> methods of the {@link Collection} and {@link
  * Iterator} interfaces.
  */
-public class LinkedTransferQueue<E> extends AbstractQueue<E>
+public class LinkedTransferQueue.Comment.8<E> extends AbstractQueue<E>
     implements TransferQueue<E>, java.io.Serializable {
     private static final long serialVersionUID = -3223113410248163686L;
 
