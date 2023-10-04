@@ -696,7 +696,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
      * to calling unparkSuccessor of head if it needs signal.)
-     *
      * 共享模式的释放操作——发出后续信号并确保传播。
      * （注意：对于独占模式，如果需要信号，
      * 释放就相当于调用head的unparkSuccessor。）
@@ -712,7 +711,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          * while we are doing this. Also, unlike other uses of
          * unparkSuccessor, we need to know if CAS to reset status
          * fails, if so rechecking.
-         *
          * 确保一个发布传播，即使还有其他正在进行的获取/发布。
          * 如果需要信号，这将以通常的方式进行，尝试打开头部的继承器。
          * 但如果没有，则将状态设置为“传播”，以确保在发布时继续传播。
@@ -744,7 +742,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      * PROPAGATE status was set.
      * 设置队列头，并检查后续队列是否在共享模式下等待，
      * 如果是，则在设置了propagate>0或propagate状态时进行传播。
-     * 
      * @param node the node
      * @param propagate the return value from a tryAcquireShared
      */
@@ -769,7 +766,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
          *   下一个节点正在共享模式中等待，
          *     or we don't know, because it appears null
          *     我们不知道，因为它看起来是空的
-         *
          * The conservatism in both of these checks may cause
          * unnecessary wake-ups, but only when there are multiple
          * racing acquires/releases, so most need signals now or soon
