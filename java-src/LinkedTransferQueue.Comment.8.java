@@ -827,21 +827,17 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
     /**
      * Implements all queuing methods. See above for explanation.
      * 实现所有排队方法。请参阅上面的说明。
-     * 
      * @param e the item or null for take null:take
      * @param haveData true if this is a put, else a take 
      * @param how NOW, ASYNC, SYNC, or TIMED
      * @param nanos timeout in nanosecs, used only if mode is TIMED
-     * @return an item if matched, else e
-     * @throws NullPointerException if haveData mode but e is null
      */
     private E xfer(E e, boolean haveData, int how, long nanos) {
         if (haveData && (e == null)){
             throw new NullPointerException();
         }
         //要附加的节点（如果需要）
-        Node s = null;                        // the node to append, if needed
-
+        Node s = null;               // the node to append, if needed
         retry:
         for (;;) { // restart on append race 加入节点时争用时重新启动
 
