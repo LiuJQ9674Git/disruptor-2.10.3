@@ -165,12 +165,41 @@ public class LinkedTransferQueue.Code.8<E> extends AbstractQueue<E>
     private static final int SYNC  = 2; // for transfer, take
     private static final int TIMED = 3; // for timed poll, tryTransfer
 
-    @SuppressWarnings("unchecked")
-    static <E> E cast(Object item) {
-        // assert item == null || item.getClass() != Node.class;
-        return (E) item;
+    /**
+     * Tries to append node s as tail.
+     *
+     * @param s the node to append
+     * @param haveData true if appending in data mode
+     * @return null on failure due to losing race with append in
+     * different mode, else s's predecessor, or s itself if no
+     * predecessor
+     */
+    private Node tryAppend(Node s, boolean haveData) {
+        for (Node t = tail, p = t;;) {        // move p to last node and append
+            Node n, u;                        // temps for reads of next & tail
+            if (p == null && (p = head) == null) {
+                if (casHead(null, s))
+                    return s;                 // initialize
+            }
+            else if (p.cannotPrecede(haveData))
+                return null;                  // lost race vs opposite mode
+            else if ((n = p.next) != null)    // not last; keep traversing
+                p = p != t && t != (u = tail) ? (t = u) : // stale tail
+                    (p != n) ? n : null;      // restart if off list
+            else if (!p.casNext(null, s))
+                p = p.next;                   // re-read on CAS failure
+            else {
+                if (p != t) {                 // update if slack now >= 2
+                    while ((tail != t || !casTail(t, s)) &&
+                           (t = tail)   != null &&
+                           (s = t.next) != null && // advance and retry
+                           (s = s.next) != null && s != t);
+                }
+                return p;
+            }
+        }
     }
-
+    
     /**
      * Implements all queuing methods. See above for explanation.
      *
@@ -224,41 +253,6 @@ public class LinkedTransferQueue.Code.8<E> extends AbstractQueue<E>
                     return awaitMatch(s, pred, e, (how == TIMED), nanos);
             }
             return e; // not waiting
-        }
-    }
-
-    /**
-     * Tries to append node s as tail.
-     *
-     * @param s the node to append
-     * @param haveData true if appending in data mode
-     * @return null on failure due to losing race with append in
-     * different mode, else s's predecessor, or s itself if no
-     * predecessor
-     */
-    private Node tryAppend(Node s, boolean haveData) {
-        for (Node t = tail, p = t;;) {        // move p to last node and append
-            Node n, u;                        // temps for reads of next & tail
-            if (p == null && (p = head) == null) {
-                if (casHead(null, s))
-                    return s;                 // initialize
-            }
-            else if (p.cannotPrecede(haveData))
-                return null;                  // lost race vs opposite mode
-            else if ((n = p.next) != null)    // not last; keep traversing
-                p = p != t && t != (u = tail) ? (t = u) : // stale tail
-                    (p != n) ? n : null;      // restart if off list
-            else if (!p.casNext(null, s))
-                p = p.next;                   // re-read on CAS failure
-            else {
-                if (p != t) {                 // update if slack now >= 2
-                    while ((tail != t || !casTail(t, s)) &&
-                           (t = tail)   != null &&
-                           (s = t.next) != null && // advance and retry
-                           (s = s.next) != null && s != t);
-                }
-                return p;
-            }
         }
     }
 
@@ -692,22 +686,11 @@ public class LinkedTransferQueue.Code.8<E> extends AbstractQueue<E>
         }
         return n;
     }
-
-    /**
-     * Returns an iterator over the elements in this queue in proper sequence.
-     * The elements will be returned in order from first (head) to last (tail).
-     *
-     * <p>The returned iterator is
-     * <a href="package-summary.html#Weakly"><i>weakly consistent</i></a>.
-     *
-     * @return an iterator over the elements in this queue in proper sequence
-     */
-    public Iterator<E> iterator() {
-        return new Itr();
-    }
-
-    public E peek() {
-        return firstDataItem();
+    
+    @SuppressWarnings("unchecked")
+    static <E> E cast(Object item) {
+        // assert item == null || item.getClass() != Node.class;
+        return (E) item;
     }
 
     /**
