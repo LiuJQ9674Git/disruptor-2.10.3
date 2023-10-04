@@ -653,6 +653,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
         /**
          * Constructs a new node.  Uses relaxed write because item can
          * only be seen after publication via casNext.
+         * 
          * 构造一个新节点。使用轻松写入，因为只有在通过casNext发布后才能看到数据item。
          */
         Node(Object item, boolean isData) {
@@ -663,7 +664,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
         /**
          * Links node to itself to avoid garbage retention.  Called
          * only after CASing head field, so uses relaxed write.
-         *
+         * 
          * 将节点链接到自身以避免垃圾保留。仅在CASing头字段之后调用，因此使用轻松写入。
          */
         final void forgetNext() {
@@ -682,7 +683,8 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
          * 将item设置为self，将waiter设置为null，以避免匹配或取消后的垃圾保留。
          * 使用宽松的写入，因为顺序在唯一的调用上下文中已经受到约束：
          * 只有在提取项的volatile/原子机制之后，项item才会被废弃。
-         * 类似地，清理waiter要么跟随CAS，要么从阻塞park返回（如果曾经阻塞parked；否则我们不在乎）。
+         * 类似地，清理waiter要么跟随CAS，
+         * 要么从阻塞park返回（如果曾经阻塞parked；否则我们不在乎）。
          */
         final void forgetContents() {
             UNSAFE.putObject(this, itemOffset, this);
@@ -723,6 +725,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
 
         /**
          * Tries to artificially match a data node -- used by remove.
+         * 
          * 尝试人为地匹配数据节点--由remove使用。
          */
         final boolean tryMatchData() {
