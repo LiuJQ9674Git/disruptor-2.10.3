@@ -1020,6 +1020,8 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         }
     }
     
+    // shared mode methods
+    
     /**
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
@@ -1084,7 +1086,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         throw new UnsupportedOperationException();
     }
 
-    
     protected int tryAcquireShared(int arg) {
         throw new UnsupportedOperationException();
     }
