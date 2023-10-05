@@ -890,7 +890,16 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return false;
     }
 
-    // shared mode methods
+    // shared mode methods exports
+    protected int tryAcquireShared(int arg) {
+        throw new UnsupportedOperationException();
+    }
+
+    protected boolean tryReleaseShared(int arg) {
+        throw new UnsupportedOperationException();
+    }
+    
+    // shared mode public methods
     /**
      * Acquires in shared mode, ignoring interrupts.  Implemented by
      * first invoking at least once {@link #tryAcquireShared},
@@ -907,7 +916,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             doAcquireShared(arg);
         }
     }
-
 
     /**
      * Releases in shared mode.  Implemented by unblocking one or more
@@ -926,6 +934,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return false;
     }
 
+    // shared mode private methods
     /**
      * Acquires in shared uninterruptible mode.
      * 以共享不间断模式获取。
@@ -1020,18 +1029,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         }
     }
     
-
-    // shared mode methods exports
     
-    protected int tryAcquireShared(int arg) {
-        throw new UnsupportedOperationException();
-    }
-
-    protected boolean tryReleaseShared(int arg) {
-        throw new UnsupportedOperationException();
-    }
-    
-    // shared mode methods
     /**
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
@@ -1087,7 +1085,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
     
 
-    // Main exported methods
+    // Main acquire exported methods
     protected boolean tryAcquire(int arg) {
         throw new UnsupportedOperationException();
     }
