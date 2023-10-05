@@ -596,10 +596,11 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      */
     private Node enq(final Node node) {
         for (;;) {
-            Node t = tail;
+            Node t = tail; //尾节点
             // 安全检查
-            if (t == null) { // Must initialize
-                if (compareAndSetHead(new Node())){
+            if (t == null) { // 尾节点不存在则创建头节点哨兵，Must initialize
+                if (compareAndSetHead(new Node())){ //保证必须有头节点Head
+                    //头节点、尾节点初始化
                     tail = head;
                 }
             } else {
@@ -617,16 +618,19 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     /**
      * Creates and enqueues node for current thread and given mode.
      * 线程写入队列/没有执行park
+     *
+     * doAcquireShared acquire 调用
+     * 
      * @param mode Node.EXCLUSIVE for exclusive, Node.SHARED for shared
      * @return the new node
      */
     private Node addWaiter(Node mode) {
         Node node = new Node(Thread.currentThread(), mode);
         // Try the fast path of enq; backup to full enq on failure
-        Node pred = tail;
-        if (pred != null) {
-            node.prev = pred;
-            if (compareAndSetTail(pred, node)) {
+        Node pred = tail; //尾部加入节点
+        if (pred != null) { //存在尾部节点
+            node.prev = pred; // pred/tail   node ，CAS前更新prev
+            if (compareAndSetTail(pred, node)) { // CAS成功更新 next
                 pred.next = node; //尾部添加
                 return node;
             }
@@ -636,11 +640,14 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return node;
     }
 
-    /**Sets head of queue to be node, thus dequeuing. Called only by
+    /**
+     *Sets head of queue to be node, thus dequeuing. Called only by
      * acquire methods.  Also nulls out unused fields for sake of GC
      * and to suppress unnecessary signals and traversals.
+     * 
      * 将队列的头设置为节点，从而出列。仅由调用获取方法。
      * 为了GC，还将未使用的字段清空并且抑制不必要的信号和遍历。
+     * 
      * @param node the node
      */
     private void setHead(Node node) {
@@ -650,9 +657,43 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     /**
+     * Convenience method to interrupt current thread.
+     * 线程中断，
+     * 中断当前线程的方便方法。
+     */
+    static void selfInterrupt() {
+        //如果不使用 Thread.currentThread().interrupt()
+        //方法来设置线程的中断状态为 “中断”，则线程的中断状态将保持不变。
+        //在这种情况下，线程可能会继续执行而不响应中断请求，
+        //导致无法正确停止或退出循环，或者无法在阻塞状态下及时响应中断请求。
+        //因此，应根据需要在适当的时候检查线程的中断状态，并进行相应的处理。
+        Thread.currentThread().interrupt();
+    }
+
+    /**
+     * Convenience method to park and then check if interrupted
+     *
+     * 执行中断后的线程阻塞与检查
+     * 
+     * 共享模式和独占模式
+     *
+     * acquireQueued doAcquireShared 调用
+     * 
+     * @return {@code true} if interrupted
+     */
+    private final boolean parkAndCheckInterrupt() {
+        LockSupport.park(this);
+        // 回当前线程的被打断状态,同时清除打断状态
+        return Thread.interrupted();
+    }
+    
+    /**
      * Wakes up node's successor, if one exists.
      * 
      * release是否锁方法调用
+     * 释放仅仅调用此方法
+     *
+     * cancelAcquire  release 调用
      * 
      * @param node the node
      */
@@ -695,100 +736,8 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     /**
-     * Release action for shared mode -- signals successor and ensures
-     * propagation. (Note: For exclusive mode, release just amounts
-     * to calling unparkSuccessor of head if it needs signal.)
-     * 
-     * 共享模式的释放操作——发出后续信号并确保传播。
-     * （注意：对于独占模式，如果需要信号，
-     * 
-     * 释放就相当于调用head的unparkSuccessor。）
+     * doAcquireShared acquireQueued
      */
-    private void doReleaseShared() {
-        /*
-         * Ensure that a release propagates, even if there are other
-         * in-progress acquires/releases.  This proceeds in the usual
-         * way of trying to unparkSuccessor of head if it needs
-         * signal. But if it does not, status is set to PROPAGATE to
-         * ensure that upon release, propagation continues.
-         * Additionally, we must loop in case a new node is added
-         * while we are doing this. Also, unlike other uses of
-         * unparkSuccessor, we need to know if CAS to reset status
-         * fails, if so rechecking.
-         * 
-         * 确保一个发布传播，即使还有其他正在进行的获取/发布。
-         * 如果需要信号，这将以通常的方式进行，尝试打开头部的继承器。
-         * 但如果没有，则将状态设置为“传播”，以确保在发布时继续传播。
-         * 此外，我们必须循环，以防在执行此操作时添加新节点。
-         * 此外，与unparkSuccessor的其他使用不同，
-         * 我们需要知道CAS重置状态是否失败，如果是，则重新检查。
-         */
-        for (;;) {
-            Node h = head;
-            if (h != null && h != tail) {
-                int ws = h.waitStatus;
-                if (ws == Node.SIGNAL) {
-                    if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
-                        continue;            // loop to recheck cases
-                    unparkSuccessor(h);
-                }
-                else if (ws == 0 &&
-                         !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
-                    continue;                // loop on failed CAS
-            }
-            if (h == head)                   // loop if head changed
-                break;
-        }
-    }
-
-    /**
-     * Sets head of queue, and checks if successor may be waiting
-     * in shared mode, if so propagating if either propagate > 0 or
-     * PROPAGATE status was set.
-     * 
-     * 设置队列头，并检查后续队列是否在共享模式下等待，
-     * 如果是，则在设置了propagate>0或propagate状态时进行传播。
-     * 
-     * @param node the node
-     * @param propagate the return value from a tryAcquireShared
-     */
-    private void setHeadAndPropagate(Node node, int propagate) {
-        Node h = head; // Record old head for check below
-        setHead(node);
-        /*
-         * Try to signal next queued node if:
-         * 如果出现以下情况，请尝试发出下一个排队节点的信号：
-         *   Propagation was indicated by caller,
-         *   传播由呼叫者指示，
-         *     or was recorded (as h.waitStatus either before
-         *     之前记录为（作为h.waitStatus
-         *     or after setHead) by a previous operation
-         *     通过以前的操作
-         *     (note: this uses sign-check of waitStatus because
-         *      PROPAGATE status may transition to SIGNAL.)
-         *      （注意：这使用waitStatus的符号检查，
-         *      因为PROPAGATE状态可能转换为SIGNAL。）
-         * and
-         *   The next node is waiting in shared mode,
-         *   下一个节点正在共享模式中等待，
-         *     or we don't know, because it appears null
-         *     我们不知道，因为它看起来是空的
-         * The conservatism in both of these checks may cause
-         * unnecessary wake-ups, but only when there are multiple
-         * racing acquires/releases, so most need signals now or soon
-         * anyway.
-         *
-         * 这两种检查中的保守性可能会导致不必要的唤醒，但只有当有多个比赛获取/发布时，
-         * 所以大多数人现在或很快都需要信号。
-         */
-        if (propagate > 0 || h == null || h.waitStatus < 0 ||
-            (h = head) == null || h.waitStatus < 0) {
-            Node s = node.next;
-            if (s == null || s.isShared())
-                doReleaseShared();
-        }
-    }
-
     private void cancelAcquire(Node node) {
         // Ignore if node doesn't exist
         if (node == null){
@@ -845,6 +794,46 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     /**
+     * Acquires in exclusive mode, ignoring interrupts.  Implemented
+     * by invoking at least once {@link #tryAcquire},
+     * returning on success.  Otherwise the thread is queued, possibly
+     * repeatedly blocking and unblocking, invoking {@link
+     * #tryAcquire} until success.  This method can be used
+     * to implement method {@link Lock#lock}.
+     * 独占模式
+     * @param arg the acquire argument.  This value is conveyed to
+     *        {@link #tryAcquire} but is otherwise uninterpreted and
+     *        can represent anything you like.
+     */
+    public final void acquire(int arg) {
+        if (!tryAcquire(arg) && //调用子类实现
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+
+    /**
+     * Releases in exclusive mode.  Implemented by unblocking one or
+     * more threads if {@link #tryRelease} returns true.
+     * This method can be used to implement method {@link Lock#unlock}.
+     * 独占模式
+     * @param arg the release argument.  This value is conveyed to
+     *        {@link #tryRelease} but is otherwise uninterpreted and
+     *        can represent anything you like.
+     * @return the value returned from {@link #tryRelease}
+     */
+    public final boolean release(int arg) {
+        if (tryRelease(arg)) {
+            Node h = head;
+            if (h != null && h.waitStatus != 0){
+                unparkSuccessor(h);
+            }
+            return true;
+        }
+        return false;
+    }
+    
+    //
+    /**
      * Checks and updates status for a node that failed to acquire.
      * Returns true if thread should block. This is the main signal
      * control in all acquire loops.  Requires that pred == node.prev.
@@ -889,37 +878,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     /**
-     * Convenience method to interrupt current thread.
-     * 中断当前线程的方便方法。
-     */
-    static void selfInterrupt() {
-        Thread.currentThread().interrupt();
-    }
-
-    /**
-     * Convenience method to park and then check if interrupted
-     * 执行中断后的线程阻塞与检查
-     * @return {@code true} if interrupted
-     */
-    private final boolean parkAndCheckInterrupt() {
-        LockSupport.park(this);
-        return Thread.interrupted();
-    }
-
-    /*
-     * Various flavors of acquire, varying in exclusive/shared and
-     * control modes.  Each is mostly the same, but annoyingly
-     * different.  Only a little bit of factoring is possible due to
-     * interactions of exception mechanics (including ensuring that we
-     * cancel if tryAcquire throws exception) and other control, at
-     * least not without hurting performance too much.
-     * 
-     * 各种风格的acquire，在独家/共享和控制模式。每个基本上都一样，
-     * 但令人恼火不同。由于异常机制的交互作用（包括确保如果tryAcquire抛出异常，则取消）
-     * 和其他控件，位于至少在不太影响表现的情况下。
-     */
-
-    /**
      * Acquires in exclusive uninterruptible mode for thread already in
      * queue. Used by condition wait methods as well as acquire.
      * 独占不可中断模式 线程已经入队列
@@ -952,9 +910,46 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         }
     }
 
+    // shared mode methods
+    /**
+     * Acquires in shared mode, ignoring interrupts.  Implemented by
+     * first invoking at least once {@link #tryAcquireShared},
+     * returning on success.  Otherwise the thread is queued, possibly
+     * repeatedly blocking and unblocking, invoking {@link
+     * #tryAcquireShared} until success.
+     * 共享模式
+     * @param arg the acquire argument.  This value is conveyed to
+     *        {@link #tryAcquireShared} but is otherwise uninterpreted
+     *        and can represent anything you like.
+     */
+    public final void acquireShared(int arg) {
+        if (tryAcquireShared(arg) < 0)
+            doAcquireShared(arg);
+    }
+
+
+    /**
+     * Releases in shared mode.  Implemented by unblocking one or more
+     * threads if {@link #tryReleaseShared} returns true.
+     * 共享模式
+     * @param arg the release argument.  This value is conveyed to
+     *        {@link #tryReleaseShared} but is otherwise uninterpreted
+     *        and can represent anything you like.
+     * @return the value returned from {@link #tryReleaseShared}
+     */
+    public final boolean releaseShared(int arg) {
+        if (tryReleaseShared(arg)) {
+            doReleaseShared();
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Acquires in shared uninterruptible mode.
      * 以共享不间断模式获取。
+     *
+     * acquireShared 调用
      * 
      * @param arg the acquire argument
      */
@@ -985,6 +980,106 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
                 cancelAcquire(node);
         }
     }
+    
+    /**
+     * Sets head of queue, and checks if successor may be waiting
+     * in shared mode, if so propagating if either propagate > 0 or
+     * PROPAGATE status was set.
+     * 
+     * doAcquireShared 调用
+     * 
+     * 设置队列头，并检查后续队列是否在共享模式下等待，
+     * 如果是，则在设置了propagate>0或propagate状态时进行传播。
+     * 
+     * @param node the node
+     * @param propagate the return value from a tryAcquireShared
+     */
+    private void setHeadAndPropagate(Node node, int propagate) {
+        Node h = head; // Record old head for check below
+        setHead(node);
+        /*
+         * Try to signal next queued node if:
+         * 如果出现以下情况，请尝试发出下一个排队节点的信号：
+         *   Propagation was indicated by caller,
+         *   传播由呼叫者指示，
+         *     or was recorded (as h.waitStatus either before
+         *     之前记录为（作为h.waitStatus
+         *     or after setHead) by a previous operation
+         *     通过以前的操作
+         *     (note: this uses sign-check of waitStatus because
+         *      PROPAGATE status may transition to SIGNAL.)
+         *      （注意：这使用waitStatus的符号检查，
+         *      因为PROPAGATE状态可能转换为SIGNAL。）
+         * and
+         *   The next node is waiting in shared mode,
+         *   下一个节点正在共享模式中等待，
+         *     or we don't know, because it appears null
+         *     我们不知道，因为它看起来是空的
+         * The conservatism in both of these checks may cause
+         * unnecessary wake-ups, but only when there are multiple
+         * racing acquires/releases, so most need signals now or soon
+         * anyway.
+         *
+         * 这两种检查中的保守性可能会导致不必要的唤醒，但只有当有多个比赛获取/发布时，
+         * 所以大多数人现在或很快都需要信号。
+         */
+        if (propagate > 0 || h == null || h.waitStatus < 0 ||
+            (h = head) == null || h.waitStatus < 0) {
+            Node s = node.next;
+            if (s == null || s.isShared())
+                doReleaseShared();
+        }
+    }
+    
+    /**
+     * Release action for shared mode -- signals successor and ensures
+     * propagation. (Note: For exclusive mode, release just amounts
+     * to calling unparkSuccessor of head if it needs signal.)
+     * 
+     * 共享模式的释放操作——发出后续信号并确保传播。
+     * （注意：对于独占模式，如果需要信号，
+     * 
+     * setHeadAndPropagate releaseShared
+     *  
+     * 释放就相当于调用head的unparkSuccessor。）
+     */
+    private void doReleaseShared() {
+        /*
+         * Ensure that a release propagates, even if there are other
+         * in-progress acquires/releases.  This proceeds in the usual
+         * way of trying to unparkSuccessor of head if it needs
+         * signal. But if it does not, status is set to PROPAGATE to
+         * ensure that upon release, propagation continues.
+         * Additionally, we must loop in case a new node is added
+         * while we are doing this. Also, unlike other uses of
+         * unparkSuccessor, we need to know if CAS to reset status
+         * fails, if so rechecking.
+         * 
+         * 确保一个发布传播，即使还有其他正在进行的获取/发布。
+         * 如果需要信号，这将以通常的方式进行，尝试打开头部的继承器。
+         * 但如果没有，则将状态设置为“传播”，以确保在发布时继续传播。
+         * 此外，我们必须循环，以防在执行此操作时添加新节点。
+         * 此外，与unparkSuccessor的其他使用不同，
+         * 我们需要知道CAS重置状态是否失败，如果是，则重新检查。
+         */
+        for (;;) {
+            Node h = head;
+            if (h != null && h != tail) {
+                int ws = h.waitStatus;
+                if (ws == Node.SIGNAL) {
+                    if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
+                        continue;            // loop to recheck cases
+                    unparkSuccessor(h);
+                }
+                else if (ws == 0 &&
+                         !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
+                    continue;                // loop on failed CAS
+            }
+            if (h == head)                   // loop if head changed
+                break;
+        }
+    }
+    
 
     // Main exported methods
     protected boolean tryAcquire(int arg) {
@@ -1007,79 +1102,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     protected boolean isHeldExclusively() {
         throw new UnsupportedOperationException();
     }
-
-    /**
-     * Acquires in exclusive mode, ignoring interrupts.  Implemented
-     * by invoking at least once {@link #tryAcquire},
-     * returning on success.  Otherwise the thread is queued, possibly
-     * repeatedly blocking and unblocking, invoking {@link
-     * #tryAcquire} until success.  This method can be used
-     * to implement method {@link Lock#lock}.
-     *
-     * @param arg the acquire argument.  This value is conveyed to
-     *        {@link #tryAcquire} but is otherwise uninterpreted and
-     *        can represent anything you like.
-     */
-    public final void acquire(int arg) {
-        if (!tryAcquire(arg) && //调用子类实现
-            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
-            selfInterrupt();
-    }
-
-    /**
-     * Releases in exclusive mode.  Implemented by unblocking one or
-     * more threads if {@link #tryRelease} returns true.
-     * This method can be used to implement method {@link Lock#unlock}.
-     *
-     * @param arg the release argument.  This value is conveyed to
-     *        {@link #tryRelease} but is otherwise uninterpreted and
-     *        can represent anything you like.
-     * @return the value returned from {@link #tryRelease}
-     */
-    public final boolean release(int arg) {
-        if (tryRelease(arg)) {
-            Node h = head;
-            if (h != null && h.waitStatus != 0)
-                unparkSuccessor(h);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Acquires in shared mode, ignoring interrupts.  Implemented by
-     * first invoking at least once {@link #tryAcquireShared},
-     * returning on success.  Otherwise the thread is queued, possibly
-     * repeatedly blocking and unblocking, invoking {@link
-     * #tryAcquireShared} until success.
-     *
-     * @param arg the acquire argument.  This value is conveyed to
-     *        {@link #tryAcquireShared} but is otherwise uninterpreted
-     *        and can represent anything you like.
-     */
-    public final void acquireShared(int arg) {
-        if (tryAcquireShared(arg) < 0)
-            doAcquireShared(arg);
-    }
-
-
-    /**
-     * Releases in shared mode.  Implemented by unblocking one or more
-     * threads if {@link #tryReleaseShared} returns true.
-     *
-     * @param arg the release argument.  This value is conveyed to
-     *        {@link #tryReleaseShared} but is otherwise uninterpreted
-     *        and can represent anything you like.
-     * @return the value returned from {@link #tryReleaseShared}
-     */
-    public final boolean releaseShared(int arg) {
-        if (tryReleaseShared(arg)) {
-            doReleaseShared();
-            return true;
-        }
-        return false;
-    }
-
+    
     // Queue inspection methods
 
     /**
