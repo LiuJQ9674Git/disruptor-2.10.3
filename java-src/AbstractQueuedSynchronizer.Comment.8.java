@@ -1020,8 +1020,18 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         }
     }
     
-    // shared mode methods
+
+    // shared mode methods exports
     
+    protected int tryAcquireShared(int arg) {
+        throw new UnsupportedOperationException();
+    }
+
+    protected boolean tryReleaseShared(int arg) {
+        throw new UnsupportedOperationException();
+    }
+    
+    // shared mode methods
     /**
      * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
@@ -1083,14 +1093,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     }
 
     protected boolean tryRelease(int arg) {
-        throw new UnsupportedOperationException();
-    }
-
-    protected int tryAcquireShared(int arg) {
-        throw new UnsupportedOperationException();
-    }
-
-    protected boolean tryReleaseShared(int arg) {
         throw new UnsupportedOperationException();
     }
 
