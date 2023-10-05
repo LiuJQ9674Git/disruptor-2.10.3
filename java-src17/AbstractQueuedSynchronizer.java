@@ -48,11 +48,19 @@ import jdk.internal.misc.Unsafe;
  * 而是它定义诸如acquireInterruptibly之类的方法，
  * 具体锁和相关同步器可以适当地调用这些方法来实现它们的公共方法。
  *
- * <p>This class supports either or both a default <em>exclusive</em>
- * mode and a <em>shared</em> mode. When acquired in exclusive mode,
+ * <p>This class supports either or both a default exclusive
+ * mode and a shared mode. When acquired in exclusive mode,
  * attempted acquires by other threads cannot succeed. Shared mode
- * acquires by multiple threads may (but need not) succeed. This class
- * does not &quot;understand&quot; these differences except in the
+ * acquires by multiple threads may (but need not) succeed.
+ * 
+ * 此类支持默认的独占模式和共享模式之一或两者。
+ * 在独占模式下获取时，其他线程尝试的获取无法成功。
+ * 多个线程获取共享模式可能（但不一定）成功。
+ * 
+ * 一个线程获取共享锁，下一个等待线程需要确定此线程是否也能获得锁，
+ * 这些不同模式下线，等待线程共享一个队列
+ * 
+ * This class does not understand these differences except in the
  * mechanical sense that when a shared mode acquire succeeds, the next
  * waiting thread (if one exists) must also determine whether it can
  * acquire as well. Threads waiting in the different modes share the
@@ -61,11 +69,12 @@ import jdk.internal.misc.Unsafe;
  * {@link ReadWriteLock}. Subclasses that support only exclusive or
  * only shared modes need not define the methods supporting the unused mode.
  *
- *此类支持默认的独占模式和共享模式之一或两者。
- *在独占模式下获取时，其他线程尝试的获取无法成功。
- *多个线程获取共享模式可能（但不一定）成功。通常，实现子类只支持其中一种模式，
- *但两者都可以发挥作用。
- *
+ * 这个类不理解这些差异，除了在机制意义上，当共享模式获取成功时，
+ * 下一个等待线程（如果存在）也必须确定它是否也可以获取。
+ * 在不同模式下等待的线程共享相同的FIFO队列。
+ * 通常，实现子类只支持其中一种模式，但两者都可以实现，即子类实现的方法有两组
+ * 例如在｛ReadWriteLock｝中。只支持独占或共享模式的子类不需要定义支持未使用模式的方法。
+ * 
  * <p>This class defines a nested {@link ConditionObject} class that
  * can be used as a {@link Condition} implementation by subclasses
  * supporting exclusive mode for which method {@link
@@ -75,6 +84,11 @@ import jdk.internal.misc.Unsafe;
  * value fully releases this object, and {@link #acquire}, given this saved state value,
  * eventually restores this object to its previous acquired state.
  *
+ * 这个类定义了一个嵌套的｛ConditionObject｝类，该类可以由支持独占模式的子类用作｛Condition｝实现，
+ * 方法｛isHeldExclusive｝报告同步是否相对于当前线程独占，
+ * 用当前｛getState｝值调用的方法{release｝完全释放这个对象，
+ * 并且｛acquire｝，给定这个保存的状态值，最终将该对象恢复到其先前获取的状态。
+ * 
  * No {@code AbstractQueuedSynchronizer} method otherwise creates such a
  * condition, so if this constraint cannot be met, do not use it.  The
  * behavior of {@link ConditionObject} depends of course on the
@@ -82,10 +96,6 @@ import jdk.internal.misc.Unsafe;
  *
  * 此类定义了嵌套的ConditionObject类，该类可由支持独占模式的子类用作Condition实现，
  * 其中方法isHeldExclusive报告同步是否相对于当前线程独占，
- * 
- * release方法调用getState获取getState当前值，并释放此对象
- * acquire方法设置状态state的值。
- * 最终relase重新存储将该对象，即恢复到其先前获取的状态。
  *
  * <p>This class provides inspection, instrumentation, and monitoring
  * methods for the internal queue, as well as similar methods for
@@ -93,6 +103,9 @@ import jdk.internal.misc.Unsafe;
  * using an {@code AbstractQueuedSynchronizer} for their
  * synchronization mechanics.
  *
+ * 此类提供内部队列的检查、检测和监视方法，以及条件对象的类似方法。
+ * 根据需要，可以使用{AbstractQueuedSynchronizer}将它们导出到类中，用于它们的同步机制。
+ * 
  * <p>Serialization of this class stores only the underlying atomic
  * integer maintaining state, so deserialized objects have empty
  * thread queues. Typical subclasses requiring serializability will
@@ -113,14 +126,24 @@ import jdk.internal.misc.Unsafe;
  * <li>{@link #tryReleaseShared}
  * <li>{@link #isHeldExclusively}
  * </ul>
- *
+ * 
+ * 在重定义的方法中通过getState、setSate 和(或) compareAndSetState 
+ * 使用同步变量状态state，这些需要定义的子方法中需要实现线程安全
+ * 
  * Each of these methods by default throws {@link
- * UnsupportedOperationException}.  Implementations of these methods
+ * UnsupportedOperationException}.
+ * Implementations of these methods
  * must be internally thread-safe, and should in general be short and
  * not block. Defining these methods is the <em>only</em> supported
  * means of using this class. All other methods are declared
  * {@code final} because they cannot be independently varied.
  *
+ * 这些方法的实现必须是内部线程安全的，并且通常应该是简短的，
+ * 而不是阻塞的。定义这些方法是唯一支持的使用此类的方法。
+ * 所有其他方法都被声明为{final}，因为它们不能独立变化。
+ *
+ * 相互依赖的方法，声明为final
+ * 
  * <p>You may also find the inherited methods from {@link
  * AbstractOwnableSynchronizer} useful to keep track of the thread
  * owning an exclusive synchronizer.  You are encouraged to use them
@@ -134,7 +157,7 @@ import jdk.internal.misc.Unsafe;
  * does not automatically enforce FIFO acquisition policies.  The core
  * of exclusive synchronization takes the form:
  *
- *即使此类基于内部FIFO队列，它也不会自动执行FIFO获取策略。独占同步的核心形式如下：
+ * 即使此类基于内部FIFO队列，它也不会自动执行FIFO获取策略。独占同步的核心形式如下：
  * <pre>
  * <em>Acquire:</em>
  *     while (!tryAcquire(arg)) {
@@ -151,34 +174,37 @@ import jdk.internal.misc.Unsafe;
  * 共享模式类似，但可能涉及级联信号
  * 
  * <p id="barging">Because checks in acquire are invoked before
- * enqueuing, a newly acquiring thread may <em>barge</em> ahead of
+ * enqueuing, a newly acquiring thread may barge ahead of
  * others that are blocked and queued.
  * 
  * 由于获取acquire方法中的检查是在排队enqueuing之前调用的，
  * 因此新的正在获取的线程可能会被队列的其它头的阻塞和排队的线程相冲突
+ * （新获得进入的线程与已经阻塞且入队的线程在队列头冲突）
  * （barge:驳停; 冲撞; 乱闯）。
  * 
  * However, you can, if desired, define {@code tryAcquire} and/or
  * {@code tryAcquireShared}
  * to disable barging by internally invoking one or more of the inspection
  * methods, thereby providing a <em>fair</em> FIFO acquisition order.
+ *
+ * 但是，如果需要，您可以定义｛tryAcquire｝和/或｛tryAcquireShared｝，
+ * 来阻止这种冲突。
  * 
  * In particular, most fair synchronizers can define {@code tryAcquire}
  * to return {@code false} if {@link #hasQueuedPredecessors} (a method
  * specifically designed to be used by fair synchronizers) returns
  * {@code true}.  Other variations are possible.
  *
- *
- * 但是，如果需要，您可以定义｛@code tryAcquire｝和/或｛@code-tryAcquireShared｝，
- * 来阻止这种冲突。
  * 具体的方案是：通过内部调用一种或多种检查方法，从而提供公平FIFO采集顺序，来解决这种冲动。
+ * （通过内部调用一个或者多个检查方法来禁止阻塞（停泊），从而提供公平的FIFO队列）
+ * 
  * 特别是，使用hasQueuedPredessors方法一种专门为公平fair同步器设计的方法返回true，
  * 则大多数公平同步器可以定义tryAcquire中hasQueuedPredecessors返回false。
  *
  *
  * <p>Throughput and scalability are generally highest for the
- * default barging (also known as <em>greedy</em>,
- * <em>renouncement</em>, and <em>convoy-avoidance</em>) strategy.
+ * default barging (also known as greedy,
+ * renouncement, and <em>convoy-avoidance</em>) strategy.
  * 默认barging冲撞（也称为贪婪放弃和车队规避）策略的吞吐量和可扩展性通常最高
  *
  * 
@@ -191,9 +217,10 @@ import jdk.internal.misc.Unsafe;
  * computations before blocking.
  *
  * 虽然这不能保证是公平的或无饥饿的，
- * 但允许较早排队的线程在较晚排队的线程之前进行重新保持，
- * 并且每次重新保持都有机会成功应对传入线程。此外，acquires时不旋转；
- * 在通常意义上，他们可以在阻塞之前执行{@code tryAcquire}的多次调用，
+ * 但允许较早排队的线程在较晚排队的线程之前进行重新争用，
+ * 并且每次重新争用都有机会成功来应对将来（incoming）线程。
+ * （每次重新竞争，相对于将来的线程，有公平成功地获取许可）
+ * 此外，acquires时不旋转；在通常意义上，他们可以在阻塞之前执行{tryAcquire}的多次调用，
  * 而这种tryAcquire调用穿插（带有）其他计算。
  * 
  * This gives most of the benefits of
@@ -215,21 +242,20 @@ import jdk.internal.misc.Unsafe;
  * synchronization in part by specializing its range of use to
  * synchronizers that can rely on {@code int} state, acquire, and
  * release parameters, and an internal FIFO wait queue.
- *
+ * 
+ * 此类为同步提供了一个高效且可扩展的基础，
+ * 部分原因是将其使用范围专门化为可以依赖int类型的状态state、acquire和
+ * release两个方法的参数，以及内部FIFO等待队列的同步器。
+ * 
  * When this does not suffice, you can build synchronizers
  * from a lower level using
  * {@link java.util.concurrent.atomic atomic} classes, your own custom
  * {@link java.util.Queue} classes, and {@link LockSupport} blocking
  * support.
  *
- * 此类为同步提供了一个高效且可扩展的基础，
- * 部分原因是将其使用范围专门化为可以依赖int类型的状态、acquire获取和
- * release释放参数以及内部FIFO等待队列的同步器。
- *
  * 可以通过低级方法实现自身代码：
  * 可以使用java.util.concurrent.atomic atomic类、
- * java.util.Queue
- * LockSuppor
+ * java.util.Queue 和 LockSuppor
  *
  * <h2>Usage Examples</h2>
  *
@@ -239,7 +265,10 @@ import jdk.internal.misc.Unsafe;
  * does not strictly require recording of the current owner
  * thread, this class does so anyway to make usage easier to monitor.
  * It also supports conditions and exposes some instrumentation methods:
- *
+ * 
+ * 不可重入互斥锁，state:0 表示未锁状态 state:1 表示已经获得锁
+ * 
+ * 互斥锁不能严格地请求记录当前拥有线程，一般情况下，要更容易可监视
  * <pre> {@code
  * class Mutex implements Lock, java.io.Serializable {
  *
@@ -248,7 +277,7 @@ import jdk.internal.misc.Unsafe;
  *     // Acquires the lock if state is zero
  *     public boolean tryAcquire(int acquires) {
  *       assert acquires == 1; // Otherwise unused
- *       if (compareAndSetState(0, 1)) {//设置持有锁
+ *       if (compareAndSetState(0, 1)) {//设置持有锁 1获得锁
  *         setExclusiveOwnerThread(Thread.currentThread());
  *         return true;
  *       }
@@ -261,7 +290,7 @@ import jdk.internal.misc.Unsafe;
  *       if (!isHeldExclusively())
  *         throw new IllegalMonitorStateException();
  *       setExclusiveOwnerThread(null);
- *       setState(0);
+ *       setState(0); //状态0 表示释放锁
  *       return true;
  *     }
  *
@@ -423,10 +452,12 @@ public abstract class AbstractQueuedSynchronizer
      * 
      * Dequeuing on acquire involves detaching (nulling) a node's
      * "prev" node and then updating the "head".
+     * 
      * acquire的出队涉及到分离（置零）node节点的“prev”节点，然后更新“head”。
      * 
      * Other threads check if a node is or was dequeued
      * by checking "prev" rather than head.
+     * 
      * 其他线程通过检查“prev”而不是head来检查节点是否已出列。
      * 
      * We enforce the nulling then setting order by spin-waiting
@@ -437,59 +468,70 @@ public abstract class AbstractQueuedSynchronizer
      * strictly "lock-free" because an acquiring thread may need to
      * wait for a previous acquire to make progress.
      *
+     * 锁算法本身并不是严格的“无锁”，因为获取线程可能需要等待先前的获取才能取得进展。
+     *
+     * 正因为如此，锁定算法本身并不是严格的“lock-free”，
+     * 因为获取acquire线程可能需要等待先前线程的获取acquire才能取得进展。
+     * 
      * When used with
      * exclusive locks, such progress is required anyway.
      *
+     * 使用独占锁，无论如何都需要非锁自由的的进展。
+     * 
      * However
      * Shared mode may (uncommonly) require a spin-wait before
      * setting head field to ensure proper propagation. (Historical
      * note: This allows some simplifications and efficiencies
      * compared to previous versions of this class.)
      * 
-     *
-     * 正因为如此，锁定算法本身并不是严格的“lock-free”，
-     * 因为获取acquire线程可能需要等待先前线程的获取acquire才能取得进展。
-     *
+     * 享模式可能（非正常）需要在设置头字段之前进行旋转等待，以确保正确传播propagation。
+     * （与该类的以前版本相比，这允许一些简化和效率。）
+     * 
      * A node's predecessor can change due to cancellation while it is
      * waiting, until the node is first in queue, at which point it
      * cannot change.
      * 
-     * 节点的前一个任务（线程）在等待时可能会由于取消而更改，
-     * 直到该节点位于队列中的第一个节点，
-     * 此时它无法更改。
+     * 节点的前一个节点（线程）在等待时可能会由于取消而更改，
+     * 直到该节点位于队列中的第一个节点，此时它无法更改。
      * 
      * The acquire methods cope with this by rechecking
      * "prev" before waiting.
      * 
-     * 获取acquire方法在等待之前通过重新检查“prev”来拷贝。
+     * acquire方法在等待之前通过重新检查“prev”来拷贝。
      *
-     * 
      * The prev and next fields are modified
      * only via CAS by cancelled nodes in method cleanQueue.
      *
      * 方法cleanQueue中的取消节点cancelled nodes仅通过CAS修改prev和next字段。
      *
+     * cleanQueue prev和next字段的修改，通过CAS操作进行
+     * 
+     * 对prev字段进行cas操作成功之后，其它线程帮助修订next字段。
+     * 
      * The unsplice strategy is reminiscent of Michael-Scott queues in
      * that after a successful CAS to prev field, other threads help
      * fix next fields.
      *
-     * prev和next字段的修改仅仅在cleanQueue，通过CAS操作进行
-     * 
-     * 对prev字段进行cas操作成功之后，其它线程帮助修订next字段。
-     *
-     * 
+     * 拆解unsplice策略Michael-Scott队列，
+     * 因为在成功完成CAS到prev字段后，其他线程会帮助修复下一个next字段。
+     *  
      * Because cancellation often occurs in bunches
      * that complicate decisions about necessary signals,
+     * 
+     * 
+     * 因为取消通常发生在bunches（大并发），需要一个复杂的决策：
+     * 有关必要信号signals在bunches（大并发），即unpark操作发出通知
+     *
      * each call to cleanQueue traverses the queue until a clean sweep.
      *
+     * 每次对cleanQueue的调用都会遍历队列queue，直到清除为止。
+     * 
      * Nodes that become relinked as first are unconditionally unparked
+     * 
      * 作为第一个重新链接的节点将释放阻塞（unconditionally unparked）
      * 
      * (sometimes unnecessarily, but those cases are not worth avoiding).
      *
-     * 因为取消通常发生在bunches（束、大并发），需要一个复杂的决策：
-     * 有关必要信号signals在bunches（束、大并发），即unpark操作发出通知
-     * 
      * 所以每次对cleanQueue的调用都会遍历队列，直到进行干净的扫描。
      * 作为第一个重新组链（上链）的节点将无条件地unparked
      *（有时是不必要的，但这些情况不值得避免）。
@@ -509,17 +551,23 @@ public abstract class AbstractQueuedSynchronizer
      * by allowing incoming threads to "barge" and
      * acquire the synchronizer while in the process of
      * enqueuing, in which case an awakened first thread may need to
-     * rewait.  To counteract possible repeated unlucky rewaits, we
+     * rewait.
+     *
+     * 我们权衡吞吐量、负载和公平使得即将进入的线程进行博弈进而获得同步器。
+     * 而当在出队列的线程，唤醒第一个线程，但可能需要在此等待
+     * 
+     * To counteract possible repeated unlucky rewaits, we
      * exponentially increase retries (up to 256) to acquire each time
      * a thread is unparked. Except in this case, AQS locks do not
      * spin; they instead interleave attempts to acquire with
      * bookkeeping steps. (Users who want spinlocks can use
      * tryAcquire.)
-     *
-     * 我们权衡吞吐量、负载和公平使得即将进入的线程进行博弈进而获得同步器。
-     * 而当在出队列的线程，唤醒第一个线程，但可能需要在此等待
      * 
-     *
+     * 为了抵消可能重复的不走运的重新等待，
+     * 我们在每次线程被打开时以指数级的方式增加重试次数（最多256次）。
+     * 除此情况外，AQS锁不会旋转；
+     * 相反，它们将尝试与记账步骤交织在一起。（旋转锁的用户可以使用tryAcquire。）
+     * 
      * To improve garbage collectibility, fields of nodes not yet on
      * list are null. (It is not rare to create and then throw away a
      * node without using it.) Fields of nodes coming off the list are
@@ -530,6 +578,14 @@ public abstract class AbstractQueuedSynchronizer
      * "tail" when fields appear null. (This is never needed in the
      * process of signalling though.)
      *
+     * 为了提高垃圾回收性，列表中尚未列出的节点的字段为null。
+     * （在不使用节点的情况下创建然后丢弃节点的情况并不少见。）
+     *
+     * 列表中的节点字段会尽快清空。
+     * 这突出了从外部确定第一个等待线程的挑战（如方法getFirstQueuedThread）。
+     * 这有时需要在字段显示为null时从原子更新的“尾部Tail”向后遍历。
+     * （不过，在发出信号的过程中，这是不需要的。）
+     * 
      * CLH queues need a dummy header node to get started. But
      * we don't create them on construction, because it would be wasted
      * effort if there is never contention. Instead, the node
@@ -548,6 +604,11 @@ public abstract class AbstractQueuedSynchronizer
      * efficient to ignore this, allowing the successor to try
      * acquiring in any case.
      *
+     * 共享模式操作与互斥模式的不同之处在于，
+     * 如果它也是共享的，则acquire会向下一个waiter发出信号，
+     * 让其尝试获取。tryAcquireShared API允许用户指示传播的程度，
+     * 但在大多数应用程序中，忽略这一点更有效，允许继任者在任何情况下尝试获取。
+     * 
      * Threads waiting on Conditions use nodes with an additional
      * link to maintain the (FIFO) list of conditions. Conditions only
      * need to link nodes in simple (non-concurrent) linked queues
@@ -780,13 +841,14 @@ public abstract class AbstractQueuedSynchronizer
                 // avoid unnecessary fence
                 node.setPrevRelaxed(t);
                 // initialize
-                if (t == null)                 
+                if (t == null){                 
                     tryInitializeHead();
-                else if (casTail(t, node)) {
+                }else if (casTail(t, node)) {
                     t.next = node;
                     // wake up to clean link
-                    if (t.status < 0)          
+                    if (t.status < 0) {         
                         LockSupport.unpark(node.waiter);
+                    }
                     break;
                 }
             }
@@ -795,9 +857,11 @@ public abstract class AbstractQueuedSynchronizer
 
     /** Returns true if node is found in traversal from tail */
     final boolean isEnqueued(Node node) {
-        for (Node t = tail; t != null; t = t.prev)
-            if (t == node)
+        for (Node t = tail; t != null; t = t.prev){
+            if (t == node){
                 return true;
+            }
+        }
         return false;
     }
 
@@ -815,7 +879,9 @@ public abstract class AbstractQueuedSynchronizer
         if (h != null &&
             (s = h.next) != null &&
             s.status != 0) {
+            // state设置为等待
             s.getAndUnsetStatus(WAITING);
+            // 解除阻塞
             LockSupport.unpark(s.waiter);
         }
     }
@@ -922,10 +988,12 @@ public abstract class AbstractQueuedSynchronizer
                         node.waiter = null;
                         //获得锁，当前线程（任务）则执行unpark
                         //当是排他的，如lock时，则当前线程中断，让出cpu
-                        if (shared)
+                        if (shared){
                             signalNextIfShared(node);
-                        if (interrupted)
+                        }
+                        if (interrupted){
                             current.interrupt();
+                        }
                     }
                     return 1;
                 }
@@ -968,73 +1036,24 @@ public abstract class AbstractQueuedSynchronizer
                 //执行阻塞操作
                 long nanos;
                 spins = postSpins = (byte)((postSpins << 1) | 1);
-                if (!timed)
+                if (!timed){
                     LockSupport.park(this);
-                else if ((nanos = time - System.nanoTime()) > 0L)
+                }
+                else if ((nanos = time - System.nanoTime()) > 0L){
                     LockSupport.parkNanos(this, nanos);
-                else
+                }
+                else{
                     break;
+                }
                 node.clearStatus();
                 //中断
                 if ((interrupted |= Thread.interrupted()) && interruptible)
                     break;
-            }
-        }
+            } // else
+            //
+        } // for-over
         //清除Acquire
         return cancelAcquire(node, interrupted, interruptible);
-    }
-
-    /**
-     * Possibly repeatedly traverses from tail,
-     * unsplicing cancelled nodes until none are found.
-     * 由acquire调用
-     * 可能会从尾部重复遍历，取消复制已取消的节点，直到找不到为止。
-     * 
-     * Unparks nodes that may have been
-     * relinked to be next eligible acquirer.
-     *
-     * 可能会从尾部重复遍历，取消没有拼接复制节点，直到找不到为止。
-     *
-     * Unparks节点 可能已重新链接为下一个符合条件的acquirer节点。
-     */
-    private void cleanQueue() {
-        for (;;) {  // restart point
-            // (p, q, s) triples 三倍
-            for (Node q = tail, s = null, p, n;;) { 
-                if (q == null || (p = q.prev) == null)
-                    // end of list 节点链尾
-                    return;                      
-                if (s == null ? tail != q : (s.prev != q || s.status < 0))
-                    // inconsistent不一致
-                    break;
-                // cancelled
-                if (q.status < 0) {
-                    //status被CN设置
-                    //status被cancelAcquire设置为CANCELLED
-                    if ((s == null ? casTail(q, p) :
-                                    s.casPrev(q, p)) &&
-                        q.prev == p) {
-                        
-                        // OK if fails
-                        p.casNext(q, s);
-                        //没有prev发unpark
-                        if (p.prev == null)
-                            signalNext(p);
-                    }
-                    break;
-                }
-                if ((n = p.next) != q) { // help finish
-                    if (n != null && q.prev == p) {
-                        p.casNext(n, q);
-                        if (p.prev == null)
-                            signalNext(p);
-                    }
-                    break;
-                }
-                s = q;
-                q = q.prev;
-            }
-        }
     }
 
     /**
@@ -1059,6 +1078,84 @@ public abstract class AbstractQueuedSynchronizer
                 Thread.currentThread().interrupt();
         }
         return 0;
+    }
+    
+    /**
+     * Possibly repeatedly traverses from tail,
+     * unsplicing cancelled nodes until none are found.
+     * 由acquire调用
+     * 可能会从尾部重复遍历，取消复制已取消的节点，直到找不到为止。
+     * 
+     * Unparks nodes that may have been
+     * relinked to be next eligible acquirer.
+     *
+     * 可能会从尾部重复遍历，取消没有拼接复制节点，直到找不到为止。
+     *
+     * Unparks节点 可能已重新链接为下一个符合条件的acquirer节点。
+     */
+    private void cleanQueue() {
+        for (;;) {  // restart point
+            // (p, q, s) triples 三倍
+            for (Node q = tail, s = null, p, n;;) { // 定义变量 q取tail
+                // 1
+                if (q == null || (p = q.prev) == null){ //p取prev
+                    // end of list 节点链尾
+                    return;
+                } // tail是空，或者tail不为空，但是tail的prev是空
+                
+                // 2
+                // s是空   q不是tail if为true 
+                // s不是空 q不是s的前继prev，或者是s前继但s的状态小于0  if为true
+                // q s 
+                if (s == null ? tail != q : (s.prev != q || s.status < 0)){
+                    // inconsistent 不一致 终止内循环
+                    break;
+                } // tail==q 往下执行 或者
+                  // s.prev == q 并且 s.status >=0 往下执行 
+                
+                // 3
+                // cancelled
+                if (q.status < 0) { // 当前节点为q ，即中间节点 p = q.prev
+                    
+                    // status被CN设置
+                    // status被cancelAcquire设置为CANCELLED
+                    // s=q q=q.prev p=q.prev
+                    //  p    q    s
+                                             // s为空，更新尾节点为p的前继，即尾部收缩一个
+                    if ((s == null ? casTail(q, p) :
+                                    s.casPrev(q, p)) && // s的前继设置为p,即向前一个节点
+                        q.prev == p) { // p = q.prev
+                        //
+                        // OK if fails
+                        // p  q  s
+                        p.casNext(q, s); // 修改next节点
+                        //   <--s.prev---|
+                        // p             s
+                        // | ---p.next-->
+                        //没有prev发unpark
+                        if (p.prev == null){
+                            signalNext(p);
+                        }
+                    }
+                    break;
+                } // q.status over
+                
+                // 4 助力其它线程 p = q.prev  p.next应当是q
+                if ((n = p.next) != q) { // help finish //其它线程执行是的p.next向前一个节点，导致
+                    if (n != null && q.prev == p) { // 其它线程中间态
+                        p.casNext(n, q); // prev字段完成，但是next字段没有更新
+                        if (p.prev == null){ // p.prev
+                            signalNext(p);
+                        }
+                    }
+                    break;
+                }
+                // p, q, s
+                // s q tail
+                s = q; // s
+                q = q.prev; // 前继节点
+            } // for-1 over
+        }
     }
 
     // Main exported methods
