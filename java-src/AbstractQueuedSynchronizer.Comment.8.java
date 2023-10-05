@@ -707,7 +707,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
              * 如果失败或等待线程更改了状态，则可以。
              */
             int ws = node.waitStatus;
-            if (ws < 0){
+            if (ws < 0){ // 阻塞节点状态设置为0
                 compareAndSetWaitStatus(node, ws, 0);
             }
     
@@ -717,18 +717,18 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
              * traverse backwards from tail to find the actual
              * non-cancelled successor.
              *
-             * 要取消标记的线程保存在后续节点中，后者通常只是下一个节点。
+             * 要执行释放阻塞的unpark线程保存在后续节点中，后者通常只是下一个节点。
              * 但如果被取消或明显为空，则从尾部向后遍历以找到实际的未取消的后续。
              */
-            Node s = node.next;
-            if (s == null || s.waitStatus > 0) {
-                s = null;
+            Node s = node.next; // Node 的下一个节点
+            if (s == null || s.waitStatus > 0) { 
+                s = null; // 没有下一个节点，如删除或者null
                 for (Node t = tail; t != null && t != node; t = t.prev)
                     if (t.waitStatus <= 0){
-                        s = t;
+                        s = t; // 从尾Tail节点，向前的最后一个节点
                     }
             }
-            //
+            // 释放阻塞
             if (s != null){
                 LockSupport.unpark(s.thread);
             }
@@ -748,7 +748,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         // Skip cancelled predecessors  跳过已取消的前置任务
         
         Node pred = node.prev;
-        while (pred.waitStatus > 0){
+        while (pred.waitStatus > 0){ // 取消
             node.prev = pred = pred.prev;
         }
 
@@ -766,7 +766,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         //可以在此处使用无条件写入而不是CAS。
         //在这个原子步骤之后，其他节点可以跳过我们。
         //以前，我们不受其他线程的干扰。
-        node.waitStatus = Node.CANCELLED;
+        node.waitStatus = Node.CANCELLED; // 1
 
         // If we are the tail, remove ourselves.
         // 如果我们是尾节点tail，就把自己移开。
@@ -779,14 +779,14 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             // 所以它会得到一个。否则会唤醒它进行传播。
             int ws;
             if (pred != head &&
-                ((ws = pred.waitStatus) == Node.SIGNAL ||
+                ((ws = pred.waitStatus) == Node.SIGNAL || // -1
                  (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) &&
                 pred.thread != null) {
                 Node next = node.next;
                 if (next != null && next.waitStatus <= 0){
                     compareAndSetNext(pred, predNext, next);
                 }
-            } else {
+            } else { //
                 unparkSuccessor(node);
             }
             node.next = node; // help GC
@@ -807,8 +807,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      */
     public final void acquire(int arg) {
         if (!tryAcquire(arg) && //调用子类实现
-            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg)){
             selfInterrupt();
+        }
     }
 
     /**
@@ -825,11 +826,46 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         if (tryRelease(arg)) {
             Node h = head;
             if (h != null && h.waitStatus != 0){
-                unparkSuccessor(h);
+                unparkSuccessor(h); // 头部节点释放阻塞
             }
             return true;
         }
         return false;
+    }
+    
+    /**
+     * Acquires in exclusive uninterruptible mode for thread already in
+     * queue. Used by condition wait methods as well as acquire.
+     * 独占不可中断模式 线程已经入队列
+     * 
+     * @param node the node
+     * @param arg the acquire argument
+     * @return {@code true} if interrupted while waiting
+     */
+    final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (;;) {
+                final Node p = node.predecessor();
+                if (p == head && tryAcquire(arg)) {
+                    //设置头部
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }
+                //获取状态
+                if (shouldParkAfterFailedAcquire(p, node) &&
+                    parkAndCheckInterrupt()) { //执行park
+                    interrupted = true;
+                }
+            } // for-over
+        } finally {
+            if (failed){
+                cancelAcquire(node);
+            }
+        }
     }
     
     //
@@ -862,7 +898,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
              */
             do {
                 node.prev = pred = pred.prev;
-            } while (pred.waitStatus > 0);
+            } while (pred.waitStatus > 0); // waitStatus 为取消状态
             pred.next = node;
         } else {
             /*
@@ -875,39 +911,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
         return false;
-    }
-
-    /**
-     * Acquires in exclusive uninterruptible mode for thread already in
-     * queue. Used by condition wait methods as well as acquire.
-     * 独占不可中断模式 线程已经入队列
-     * 
-     * @param node the node
-     * @param arg the acquire argument
-     * @return {@code true} if interrupted while waiting
-     */
-    final boolean acquireQueued(final Node node, int arg) {
-        boolean failed = true;
-        try {
-            boolean interrupted = false;
-            for (;;) {
-                final Node p = node.predecessor();
-                if (p == head && tryAcquire(arg)) {
-                    //设置头部
-                    setHead(node);
-                    p.next = null; // help GC
-                    failed = false;
-                    return interrupted;
-                }
-                //获取状态
-                if (shouldParkAfterFailedAcquire(p, node) &&
-                    parkAndCheckInterrupt()) //执行park
-                    interrupted = true;
-            }
-        } finally {
-            if (failed)
-                cancelAcquire(node);
-        }
     }
 
     // shared mode methods
@@ -923,8 +926,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
      *        and can represent anything you like.
      */
     public final void acquireShared(int arg) {
-        if (tryAcquireShared(arg) < 0)
+        if (tryAcquireShared(arg) < 0){
             doAcquireShared(arg);
+        }
     }
 
 
@@ -963,18 +967,25 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
                 if (p == head) {
                     int r = tryAcquireShared(arg);
                     if (r >= 0) {
+                        // 设置头并传播
                         setHeadAndPropagate(node, r);
                         p.next = null; // help GC
-                        if (interrupted)
+                        if (interrupted){
+                            // 中断
                             selfInterrupt();
+                        }
                         failed = false;
                         return;
                     }
-                }
+                } //p == head
+                //
                 if (shouldParkAfterFailedAcquire(p, node) &&
-                    parkAndCheckInterrupt())
+                    parkAndCheckInterrupt()){
+                    // 当前线程阻塞park，则中断
                     interrupted = true;
-            }
+                }
+                    
+            } //for-over
         } finally {
             if (failed)
                 cancelAcquire(node);
@@ -1026,8 +1037,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
             (h = head) == null || h.waitStatus < 0) {
             Node s = node.next;
-            if (s == null || s.isShared())
+            if (s == null || s.isShared()){
                 doReleaseShared();
+            }
         }
     }
     
@@ -1066,17 +1078,22 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
             Node h = head;
             if (h != null && h != tail) {
                 int ws = h.waitStatus;
-                if (ws == Node.SIGNAL) {
-                    if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
-                        continue;            // loop to recheck cases
+                if (ws == Node.SIGNAL) { // 发送信号
+                    // 设置状态没有成功则继续下一个循环
+                    if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0)){
+                        continue;      // loop to recheck cases
+                    }
+                    //正常节点，释放阻塞
                     unparkSuccessor(h);
-                }
-                else if (ws == 0 &&
+                } // 当信号为0时，则把节点状态修改为传播
+                else if (ws == 0 && //修改失败则继续下一个循环
                          !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
                     continue;                // loop on failed CAS
             }
-            if (h == head)                   // loop if head changed
+            // 头部Head没有变化则终止for循环
+            if (h == head){                   // loop if head changed
                 break;
+            }
         }
     }
     
@@ -1181,9 +1198,10 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         if (((h = head) != null && (s = h.next) != null &&
              s.prev == head && (st = s.thread) != null) ||
             ((h = head) != null && (s = h.next) != null &&
-             s.prev == head && (st = s.thread) != null))
+             s.prev == head && (st = s.thread) != null)){
             return st;
-
+        }
+            
         /*
          * Head's next field might not have been set yet, or may have
          * been unset after setHead. So we must check to see if tail
@@ -1200,8 +1218,9 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         Thread firstThread = null;
         while (t != null && t != head) {
             Thread tt = t.thread;
-            if (tt != null)
+            if (tt != null){
                 firstThread = tt;
+            }
             t = t.prev;
         }
         return firstThread;
@@ -1220,9 +1239,11 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     public final boolean isQueued(Thread thread) {
         if (thread == null)
             throw new NullPointerException();
-        for (Node p = tail; p != null; p = p.prev)
-            if (p.thread == thread)
+        for (Node p = tail; p != null; p = p.prev){
+            if (p.thread == thread){
                 return true;
+            }
+        }
         return false;
     }
 
