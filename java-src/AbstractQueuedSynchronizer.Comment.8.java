@@ -618,11 +618,7 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     /**
      * Creates and enqueues node for current thread and given mode.
      * 线程写入队列/没有执行park
-     *
      * doAcquireShared acquire 调用
-     * 
-     * @param mode Node.EXCLUSIVE for exclusive, Node.SHARED for shared
-     * @return the new node
      */
     private Node addWaiter(Node mode) {
         Node node = new Node(Thread.currentThread(), mode);
@@ -640,15 +636,11 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         return node;
     }
 
-    /**
-     *Sets head of queue to be node, thus dequeuing. Called only by
+    /**Sets head of queue to be node, thus dequeuing. Called only by
      * acquire methods.  Also nulls out unused fields for sake of GC
      * and to suppress unnecessary signals and traversals.
-     * 
      * 将队列的头设置为节点，从而出列。仅由调用获取方法。
      * 为了GC，还将未使用的字段清空并且抑制不必要的信号和遍历。
-     * 
-     * @param node the node
      */
     private void setHead(Node node) {
         head = node;
@@ -670,17 +662,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
         Thread.currentThread().interrupt();
     }
 
-    /**
-     * Convenience method to park and then check if interrupted
-     *
-     * 执行中断后的线程阻塞与检查
-     * 
-     * 共享模式和独占模式
-     *
-     * acquireQueued doAcquireShared 调用
-     * 
-     * @return {@code true} if interrupted
-     */
     private final boolean parkAndCheckInterrupt() {
         LockSupport.park(this);
         // 回当前线程的被打断状态,同时清除打断状态
@@ -689,10 +670,6 @@ public abstract class AbstractQueuedSynchronizer.Comment.8
     
     /**
      * Wakes up node's successor, if one exists.
-     * 
-     * release是否锁方法调用
-     * 释放仅仅调用此方法
-     *
      * cancelAcquire  release 调用
      * 
      * @param node the node
